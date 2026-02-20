@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import { Reminder } from '@/lib/types';
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -8,15 +8,60 @@ import { Id } from "../../convex/_generated/dataModel";
 import { useToast } from './use-toast';
 import { parseISO } from 'date-fns';
 
+const CACHE_KEY_REMINDERS = 'pollytasks_cache_reminders';
+const CACHE_EXPIRY = 10 * 60 * 1000;
+
+interface CachedData<T> {
+  data: T;
+  timestamp: number;
+}
+
+function getCachedData<T>(key: string): T | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const cached = localStorage.getItem(key);
+    if (!cached) return null;
+
+    const parsed: CachedData<T> = JSON.parse(cached);
+    const isExpired = Date.now() - parsed.timestamp > CACHE_EXPIRY;
+
+    if (isExpired) {
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedData<T>(key: string, data: T): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const cached: CachedData<T> = {
+      data,
+      timestamp: Date.now(),
+    };
+    localStorage.setItem(key, JSON.stringify(cached));
+  } catch (e) {
+    console.error("Failed to cache reminders data:", e);
+  }
+}
+
 export const useReminders = () => {
   const { toast } = useToast();
   const rawReminders = useQuery(api.reminders.get);
+  const [cachedReminders] = useState<Reminder[] | null>(() => getCachedData<Reminder[]>(CACHE_KEY_REMINDERS));
   const addReminderMutation = useMutation(api.reminders.add);
   const updateReminderMutation = useMutation(api.reminders.update);
   const deleteReminderMutation = useMutation(api.reminders.remove);
 
   const reminders: Reminder[] = useMemo(() => {
-    if (!rawReminders) return [];
+    if (rawReminders === undefined) {
+      return cachedReminders ?? [];
+    }
+
     return rawReminders.map(r => ({
       id: r._id,
       title: r.title,
@@ -40,6 +85,24 @@ export const useReminders = () => {
       // So I'll just put empty string or current date, or update schema.
       // For now, empty string is fine as it seems unused for sorting (sort is by `remind_at`).
     })).sort((a, b) => new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime());
+  }, [rawReminders, cachedReminders]);
+
+  useEffect(() => {
+    if (rawReminders !== undefined) {
+      const mappedReminders: Reminder[] = rawReminders.map(r => ({
+        id: r._id,
+        title: r.title,
+        description: r.description,
+        type: r.type as 'one-time' | 'ongoing',
+        intervalUnit: r.intervalUnit as 'minutes' | 'hours' | 'days' | 'weeks' | 'months' | undefined,
+        intervalValue: r.intervalValue,
+        remindAt: r.remindAt,
+        isActive: r.isActive,
+        icon: r.icon,
+        createdAt: "",
+      }));
+      setCachedData(CACHE_KEY_REMINDERS, mappedReminders);
+    }
   }, [rawReminders]);
 
   const addReminder = useCallback(async (reminderData: Omit<Reminder, 'id' | 'createdAt' | 'isActive'>) => {
@@ -148,7 +211,7 @@ export const useReminders = () => {
 
   return {
     reminders,
-    isInitialLoad: rawReminders === undefined,
+    isInitialLoad: rawReminders === undefined && cachedReminders === null,
     addReminder,
     updateReminder,
     deleteReminder,

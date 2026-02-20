@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, lazy, useRef, useEffect } from 'react';
+import { Suspense, lazy, useRef, useEffect, useState } from 'react';
 import Header from '@/components/header';
 import { useTaskQuest } from '@/context/task-quest-context';
 import { QuickAddMenu } from '@/components/quick-add-menu';
@@ -18,7 +18,6 @@ const Confetti = lazy(() => import('react-confetti'));
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const {
     isAuthenticated,
-    authLoading,
     user,
     signOut,
     stats,
@@ -48,6 +47,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const pathname = usePathname();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [hasRenderedContent, setHasRenderedContent] = useState(false);
+
+  useEffect(() => {
+    if (!isInitialLoad) {
+      setHasRenderedContent(true);
+    }
+  }, [isInitialLoad]);
+
+  const showInitialSkeleton = !hasRenderedContent && isInitialLoad;
 
   useEffect(() => {
     if (scrollContainerRef.current) {
@@ -91,7 +99,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Header
           stats={{ ...stats, levelInfo }}
           streaks={streaks}
-          isInitialLoad={isInitialLoad}
+          isInitialLoad={showInitialSkeleton}
           user={user}
           onSignOut={() => signOut()}
           isSyncing={false}
@@ -122,7 +130,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
             {/* Page Content - Show skeleton only in content area when loading */}
             <div className="min-h-[400px]">
-              {(isInitialLoad || authLoading) ? (
+              {showInitialSkeleton ? (
                 <LoadingSkeleton />
               ) : (
                 children

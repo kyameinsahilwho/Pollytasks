@@ -226,6 +226,6 @@ export function useWeblogs() {
         deleteWeblog,
         togglePin,
         // isLoading is false if we have cached data (localStorage-first approach)
-        isLoading: isAuthLoading || (isAuthenticated && rawWeblogs === undefined && cachedWeblogs === null),
+        isLoading: isAuthenticated ? (rawWeblogs === undefined && cachedWeblogs === null) : !isLocalLoaded,
     };
 }
