@@ -33,21 +33,11 @@ interface HabitItemProps {
 
 export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate, onDelete, onViewStats }: HabitItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [viewOffset, setViewOffset] = useState(0);
-
-  // Reset view offset when collapsed
-  useEffect(() => {
-    if (!isExpanded) {
-      setViewOffset(0);
-    }
-  }, [isExpanded]);
-
-  const viewDate = addWeeks(currentDate, viewOffset);
 
   // Daily view
   const currentWeek = eachDayOfInterval({
-    start: startOfWeek(viewDate, { weekStartsOn: 0 }),
-    end: endOfWeek(viewDate, { weekStartsOn: 0 }),
+    start: startOfWeek(currentDate, { weekStartsOn: 0 }),
+    end: endOfWeek(currentDate, { weekStartsOn: 0 }),
   });
 
   const displayDays = currentWeek;
@@ -95,8 +85,8 @@ export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate,
     if (habit.frequency === 'weekly') {
       // Show all weeks of the current month
       const weeksInMonth = eachWeekOfInterval({
-        start: startOfMonth(now),
-        end: endOfMonth(now)
+        start: startOfMonth(currentDate),
+        end: endOfMonth(currentDate)
       }, { weekStartsOn: 0 });
 
       return weeksInMonth.map((date, i) => {
@@ -105,17 +95,19 @@ export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate,
           date,
           completions,
           label: `W${i + 1}`,
-          isCurrent: isSameWeek(date, now, { weekStartsOn: 0 })
+          isCurrent: isSameWeek(date, now, { weekStartsOn: 0 }),
+          isFuture: date > now
         };
       });
     }
 
     // Default for monthly or other non-daily/weekly
-    return Array.from({ length: 4 }).map((_, i) => {
-      const date = subMonths(now, i);
+    return Array.from({ length: 6 }).map((_, i) => {
+      const date = subMonths(currentDate, i);
       const completions = getCompletionsForPeriod(date, habit.frequency);
       const label = format(date, 'MMM');
-      return { date, completions, label, isCurrent: i === 0 };
+      const isFuture = startOfMonth(date) > now;
+      return { date, completions, label, isCurrent: isSameMonth(date, now), isFuture };
     }).reverse();
   })();
 
@@ -259,14 +251,6 @@ export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate,
         </div>
 
         <div className="flex justify-between md:justify-end items-center gap-1 md:gap-3 overflow-visible pb-1 md:pb-0 relative">
-          {viewOffset !== 0 && (
-            <div className={cn(
-              "absolute -top-4 right-0 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter animate-pulse",
-              aesthetics.checkbox.split(' ')[0]
-            )}>
-              History Mode
-            </div>
-          )}
           {(habit.frequency === 'daily' || habit.frequency === 'specific_days' || ['every_2_days', 'every_3_days', 'every_4_days'].includes(habit.frequency)) ? (
             displayDays.map((date, i) => {
               const completed = isCompletedOnDate(date);
@@ -334,19 +318,19 @@ export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate,
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (period.isCurrent) handleToggle(habit.id, period.date.toISOString(), e);
+                      if (!period.isFuture) handleToggle(habit.id, period.date.toISOString(), e);
                     }}
+                    disabled={period.isFuture}
                     className={cn(
                       "w-9 h-9 md:w-11 md:h-11 rounded-xl md:rounded-2xl border-2 flex items-center justify-center transition-all relative overflow-hidden",
-                      !period.isCurrent && "opacity-40 cursor-default",
+                      period.isFuture ? "opacity-10 cursor-not-allowed border-gray-100" : "cursor-pointer active:translate-y-0.5",
                       period.completions > 0
                         ? `${aesthetics.checkbox} text-white`
                         : cn(
                           "bg-white",
                           period.isCurrent ? themeColors.border : "border-[#F1F4F9]",
                           period.isCurrent && themeColors.icon
-                        ),
-                      period.isCurrent && "active:translate-y-0.5 cursor-pointer"
+                        )
                     )}
                   >
                     {period.completions > 0 ? (
@@ -376,21 +360,6 @@ export function HabitItem({ habit, currentDate = new Date(), onToggle, onUpdate,
             className="overflow-hidden"
           >
             <div className="flex items-center gap-2 pt-4 mt-2 border-t-2 border-[#F1F4F9] flex-wrap">
-              {habit.frequency !== 'weekly' && habit.frequency !== 'monthly' && (
-                <button
-                  type="button"
-                  onClick={() => setViewOffset(prev => prev === 0 ? -1 : 0)}
-                  className={cn(
-                    "flex-1 border-2 border-b-4 font-black uppercase tracking-widest text-[10px] h-10 rounded-xl active:translate-y-0.5 active:border-b-0 transition-all flex items-center justify-center",
-                    viewOffset !== 0
-                      ? `${aesthetics.checkbox} text-white shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]`
-                      : "bg-white border-[#E2E8F0] text-[#64748B] hover:bg-slate-50"
-                  )}
-                >
-                  <History className={cn("w-4 h-4 mr-2", viewOffset !== 0 ? "text-white/80" : "text-indigo-500")} />
-                  {viewOffset === 0 ? "Last Week" : "Back to Today"}
-                </button>
-              )}
               <Button
                 variant="outline"
                 size="sm"
