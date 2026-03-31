@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CompactIconPicker } from "./icon-picker";
 import { Badge } from "@/components/ui/badge";
+import { WeblogFolder } from "@/hooks/use-weblog-folders";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -41,12 +42,13 @@ interface WeblogEditorProps {
     weblog?: Weblog | null;
     onSave: (data: any) => Promise<void>;
     existingTags?: string[];
+    folders: WeblogFolder[];
 }
 
-export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [] }: WeblogEditorProps) {
+export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [], folders = [] }: WeblogEditorProps) {
     const [title, setTitle] = useState("");
     const [emoji, setEmoji] = useState("📝");
-    const [category, setCategory] = useState("personal");
+    const [folderId, setFolderId] = useState<string | null>(null);
     const [tags, setTags] = useState<string[]>([]);
     const [newTag, setNewTag] = useState("");
     const [showTagInput, setShowTagInput] = useState(false);
@@ -137,30 +139,30 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
         const originalContent = weblog?.content || "";
         const originalTitle = weblog?.title || "";
         const originalEmoji = weblog?.emoji || "📝";
-        const originalCategory = weblog?.category || "personal";
+        const originalFolderId = weblog?.folderId || null;
         const originalTags = weblog?.tags || [];
         
         return (
             title !== originalTitle ||
             emoji !== originalEmoji ||
-            category !== originalCategory ||
+            folderId !== originalFolderId ||
             currentContent !== originalContent ||
             JSON.stringify(tags) !== JSON.stringify(originalTags)
         );
-    }, [title, emoji, category, tags, weblog]);
+    }, [title, emoji, folderId, tags, weblog]);
 
     // Save draft to localStorage
     const saveDraft = useCallback(() => {
         const draft = {
             title,
             emoji,
-            category,
+            folderId,
             tags,
             content: editorRef.current?.innerHTML || "",
             savedAt: Date.now()
         };
         localStorage.setItem(draftKey, JSON.stringify(draft));
-    }, [title, emoji, category, tags, draftKey]);
+    }, [title, emoji, folderId, tags, draftKey]);
 
     // Load draft from localStorage
     const loadDraft = useCallback(() => {
@@ -188,7 +190,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 // Load draft for new note
                 setTitle(draft.title || "");
                 setEmoji(draft.emoji || "📝");
-                setCategory(draft.category || "personal");
+                setFolderId(draft.folderId || null);
                 setTags(draft.tags || []);
                 setTimeout(() => {
                     if (editorRef.current) {
@@ -199,7 +201,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 // Load from weblog or defaults
                 setTitle(weblog?.title || "");
                 setEmoji(weblog?.emoji || "📝");
-                setCategory(weblog?.category || "personal");
+                setFolderId(weblog?.folderId || null);
                 setTags(weblog?.tags || []);
                 setTimeout(() => {
                     if (editorRef.current) {
@@ -267,7 +269,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 title: title.trim() || "Untitled Note",
                 content: getContent(),
                 emoji,
-                category,
+                folderId: folderId || undefined,
                 tags,
                 isPinned: weblog?.isPinned
             });
@@ -778,7 +780,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                         <div class="note-title-section">
                             <div class="note-title">${title || "Untitled Note"}</div>
                             <div class="note-meta">
-                                <span class="category-badge">${category}</span>
+                                <span class="category-badge">${folders.find(f => f._id === folderId)?.name || "Note"}</span>
                                 <span class="date-text">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
                             </div>
                         </div>
@@ -834,7 +836,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, title, emoji, category, tags]);
+    }, [isOpen, title, emoji, folderId, tags]);
 
     const suggestedTags = existingTags.filter(t => !tags.includes(t) && t.toLowerCase().includes(newTag.toLowerCase()));
 
@@ -913,23 +915,34 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                                 className="border-none shadow-none text-xl font-black bg-transparent p-0 h-8 focus-visible:ring-0 placeholder:text-slate-400"
                             />
                             <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Category:</span>
-                                <div className="flex gap-1">
-                                    {["personal", "journal", "ideas", "learning"].map(cat => (
-                                        <button
-                                            key={cat}
-                                            onClick={() => setCategory(cat)}
-                                            className={cn(
-                                                "h-5 px-2 rounded-full text-[9px] font-bold uppercase tracking-wider border transition-all",
-                                                category === cat
-                                                    ? "bg-slate-800 text-white border-slate-800"
-                                                    : "bg-white/50 text-slate-500 border-transparent hover:bg-slate-100"
-                                            )}
-                                        >
-                                            {cat}
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Folder:</span>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button className="flex items-center gap-1.5 h-5 px-2 rounded-full text-[9px] font-bold uppercase tracking-wider border bg-slate-800 text-white border-slate-800 hover:bg-slate-700 transition-all">
+                                            {(() => {
+                                                const f = folders.find(f => f._id === folderId);
+                                                return f ? <><span className="text-xs leading-none">{f.icon}</span>{f.name}</> : <span>No Folder</span>;
+                                            })()}
+                                            <svg className="w-2.5 h-2.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
                                         </button>
-                                    ))}
-                                </div>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="rounded-xl border-2 min-w-[160px] p-1">
+                                        {folders.map(folder => (
+                                            <DropdownMenuItem
+                                                key={folder._id}
+                                                onClick={() => setFolderId(folder._id)}
+                                                className={cn(
+                                                    "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer",
+                                                    folderId === folder._id && "bg-slate-100 text-slate-900"
+                                                )}
+                                            >
+                                                <span className="text-base leading-none">{folder.icon}</span>
+                                                {folder.name}
+                                                {folderId === folder._id && <svg className="w-3.5 h-3.5 ml-auto text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </div>
                         </div>
                     </div>
@@ -982,23 +995,37 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                     </div>
                 </div>
 
-                {/* Mobile Category */}
+                {/* Mobile Folder Picker */}
                 <div className="md:hidden px-3 py-2 bg-white/30 border-b border-slate-200/50">
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                        {["personal", "journal", "ideas", "learning"].map(cat => (
-                            <button
-                                key={cat}
-                                onClick={() => setCategory(cat)}
-                                className={cn(
-                                    "h-6 px-2.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all whitespace-nowrap shrink-0",
-                                    category === cat
-                                        ? "bg-slate-800 text-white border-slate-800"
-                                        : "bg-white/50 text-slate-500 border-slate-200"
-                                )}
-                            >
-                                {cat}
-                            </button>
-                        ))}
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Folder:</span>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-slate-800 text-white border-slate-800 hover:bg-slate-700 transition-all">
+                                    {(() => {
+                                        const f = folders.find(f => f._id === folderId);
+                                        return f ? <><span className="text-xs leading-none">{f.icon}</span>{f.name}</> : <span>No Folder</span>;
+                                    })()}
+                                    <svg className="w-2.5 h-2.5 opacity-70 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="rounded-xl border-2 min-w-[160px] p-1">
+                                {folders.map(folder => (
+                                    <DropdownMenuItem
+                                        key={folder._id}
+                                        onClick={() => setFolderId(folder._id)}
+                                        className={cn(
+                                            "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer",
+                                            folderId === folder._id && "bg-slate-100 text-slate-900"
+                                        )}
+                                    >
+                                        <span className="text-base leading-none">{folder.icon}</span>
+                                        {folder.name}
+                                        {folderId === folder._id && <svg className="w-3.5 h-3.5 ml-auto text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                 </div>
 

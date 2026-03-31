@@ -41,6 +41,7 @@ export const create = mutation({
         category: v.optional(v.string()),
         color: v.optional(v.string()),
         isPinned: v.optional(v.boolean()),
+        folderId: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
     },
     handler: async (ctx, args) => {
@@ -66,6 +67,7 @@ export const create = mutation({
             category: args.category || "personal",
             color: args.color || "yellow",
             isPinned: args.isPinned || false,
+            folderId: args.folderId,
             tags: args.tags || [],
             createdAt: now,
             updatedAt: now,
@@ -85,6 +87,7 @@ export const update = mutation({
         category: v.optional(v.string()),
         color: v.optional(v.string()),
         isPinned: v.optional(v.boolean()),
+        folderId: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
     },
     handler: async (ctx, args) => {
@@ -161,5 +164,89 @@ export const getAllTags = query({
         });
 
         return Array.from(allTags).sort();
+    },
+});
+
+// ==================== FOLDERS ====================
+
+// Get all folders for user
+export const listFolders = query({
+    args: {},
+    handler: async (ctx) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) throw new Error("Unauthenticated");
+
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_token", (q) =>
+                q.eq("tokenIdentifier", identity.tokenIdentifier)
+            )
+            .unique();
+
+        if (!user) throw new Error("User not found");
+
+        return await ctx.db
+            .query("weblogFolders")
+            .withIndex("by_user", (q) => q.eq("userId", user._id))
+            .collect();
+    },
+});
+
+export const createFolder = mutation({
+    args: {
+        name: v.string(),
+        icon: v.string(),
+        color: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) throw new Error("Unauthenticated");
+
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_token", (q) =>
+                q.eq("tokenIdentifier", identity.tokenIdentifier)
+            )
+            .unique();
+
+        if (!user) throw new Error("User not found");
+
+        const now = new Date().toISOString();
+
+        return await ctx.db.insert("weblogFolders", {
+            userId: user._id,
+            name: args.name,
+            icon: args.icon,
+            color: args.color,
+            createdAt: now,
+        });
+    },
+});
+
+export const updateFolder = mutation({
+    args: {
+        id: v.id("weblogFolders"),
+        name: v.optional(v.string()),
+        icon: v.optional(v.string()),
+        color: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) throw new Error("Unauthenticated");
+
+        const { id, ...updates } = args;
+        await ctx.db.patch(id, updates);
+    },
+});
+
+export const deleteFolder = mutation({
+    args: { id: v.id("weblogFolders") },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) throw new Error("Unauthenticated");
+
+        // Could optionally nullify folderId on associated weblogs here
+        // but simple delete is fine for now
+        await ctx.db.delete(args.id);
     },
 });

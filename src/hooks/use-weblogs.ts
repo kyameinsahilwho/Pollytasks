@@ -15,6 +15,7 @@ export type Weblog = {
     color?: string;
     isPinned?: boolean;
     category?: string;
+    folderId?: string;
     tags?: string[];
     createdAt: string;
     updatedAt: string;
@@ -153,6 +154,7 @@ export function useWeblogs(initialWeblogs?: Doc<"weblogs">[]) {
         content: string;
         emoji?: string;
         category?: string;
+        folderId?: string;
         color?: string;
         isPinned?: boolean;
         tags?: string[];
@@ -168,6 +170,7 @@ export function useWeblogs(initialWeblogs?: Doc<"weblogs">[]) {
                 content: weblogData.content,
                 emoji: weblogData.emoji || "📝",
                 category: weblogData.category || "personal",
+                folderId: weblogData.folderId,
                 color: weblogData.color,
                 isPinned: weblogData.isPinned || false,
                 tags: weblogData.tags || [],

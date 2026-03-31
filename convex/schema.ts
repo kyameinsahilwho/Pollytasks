@@ -226,11 +226,21 @@ export default defineSchema({
         color: v.optional(v.string()), // yellow, pink, blue, green
         isPinned: v.optional(v.boolean()),
         category: v.optional(v.string()), // "journal", "ideas", "learning", "personal"
+        folderId: v.optional(v.string()), // Custom folder
         tags: v.optional(v.array(v.string())), // Custom tags for organization
         createdAt: v.string(),
         updatedAt: v.string(),
     })
         .index("by_user", ["userId"])
         .index("by_user_and_category", ["userId", "category"])
-        .index("by_user_and_pinned", ["userId", "isPinned"]),
+        .index("by_user_and_pinned", ["userId", "isPinned"])
+        .index("by_folder", ["folderId"]),
+
+    weblogFolders: defineTable({
+        userId: v.id("users"),
+        name: v.string(),
+        icon: v.string(),
+        color: v.string(),
+        createdAt: v.string(),
+    }).index("by_user", ["userId"]),
 });
