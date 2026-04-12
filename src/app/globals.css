@@ -121,6 +121,19 @@
       transform: scale(0.95);
     }
   }
+
+  .today-glow {
+    animation: today-glow-pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes today-glow-pulse {
+    0%, 100% {
+      box-shadow: 0 0 3px 1px rgba(88, 204, 2, 0.35);
+    }
+    50% {
+      box-shadow: 0 0 8px 3px rgba(88, 204, 2, 0.65);
+    }
+  }
 }
 
 @layer base {

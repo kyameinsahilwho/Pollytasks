@@ -64,16 +64,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   const getTitle = () => {
-    // Check if we are in a project detail page (if we implement sub-routing for projects later)
-    // For now, simple matching
-    if (pathname === '/' || pathname === '/today') return 'Quests';
-    if (pathname?.startsWith('/habits')) return 'Rituals';
+    if (pathname === '/' || pathname === '/today') return 'Today';
     if (pathname?.startsWith('/projects')) return 'Projects';
     if (pathname?.startsWith('/social')) return 'Squad';
-    if (pathname?.startsWith('/weblog')) return 'Weblog';
+    if (pathname?.startsWith('/notes')) return 'Notes';
     if (pathname?.startsWith('/profile')) return 'Profile';
     if (pathname?.startsWith('/archive')) return 'Archive';
-    return 'Quests';
+    return 'Today';
   };
 
   // We no longer use an early return for loading state

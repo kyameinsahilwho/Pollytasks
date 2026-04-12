@@ -43,6 +43,8 @@ export const create = mutation({
         isPinned: v.optional(v.boolean()),
         folderId: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
+        rawTranscript: v.optional(v.string()),
+        audioStorageId: v.optional(v.id("_storage")),
     },
     handler: async (ctx, args) => {
         const identity = await ctx.auth.getUserIdentity();
@@ -69,6 +71,8 @@ export const create = mutation({
             isPinned: args.isPinned || false,
             folderId: args.folderId,
             tags: args.tags || [],
+            rawTranscript: args.rawTranscript,
+            audioStorageId: args.audioStorageId,
             createdAt: now,
             updatedAt: now,
         });
@@ -89,6 +93,7 @@ export const update = mutation({
         isPinned: v.optional(v.boolean()),
         folderId: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
+        rawTranscript: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         const identity = await ctx.auth.getUserIdentity();

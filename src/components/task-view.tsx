@@ -1,13 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Habit, Task } from "@/lib/types";
 import { HabitItem } from "./habit-item";
 import TaskList from "./task-list";
 import { isHabitDueToday } from "@/lib/utils";
-import { isBefore, isSameDay, startOfDay, parseISO, format } from "date-fns";
-import { AnimatePresence } from "framer-motion";
+import {
+  isBefore, isSameDay, startOfDay, parseISO, format, addWeeks, addMonths,
+  isSameWeek, isSameMonth, startOfWeek, endOfWeek, subMonths,
+} from "date-fns";
+import { motion, AnimatePresence } from "framer-motion";
 import { RitualStats } from "./ritual-stats";
+import { AddHabitDialog } from "./add-habit-dialog";
+import { ChevronLeft, ChevronRight, Target, Flame, LayoutGrid, ListTodo } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TaskViewProps {
   habits: Habit[];
@@ -15,6 +21,7 @@ interface TaskViewProps {
   onToggleHabit: (id: string, date: string) => void;
   onUpdateHabit: (id: string, data: any) => void;
   onDeleteHabit: (id: string) => void;
+  onAddHabit: (habitData: any) => void;
   onToggleTask: (id: string) => void;
   onDeleteTask: (id: string) => void;
   onEditTask: (task: Task) => void;
@@ -23,114 +30,349 @@ interface TaskViewProps {
   setCelebrating: (val: boolean) => void;
 }
 
+type Tab = 'daily' | 'weekly' | 'monthly';
+
 export function TaskView({
-  habits,
-  tasks,
-  onToggleHabit,
-  onUpdateHabit,
-  onDeleteHabit,
-  onToggleTask,
-  onDeleteTask,
-  onEditTask,
-  onAddSubtask,
-  onToggleSubtask,
-  setCelebrating
+  habits, tasks,
+  onToggleHabit, onUpdateHabit, onDeleteHabit, onAddHabit,
+  onToggleTask, onDeleteTask, onEditTask, onAddSubtask, onToggleSubtask, setCelebrating,
 }: TaskViewProps) {
   const [selectedHabitId, setSelectedHabitId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('daily');
+  const [dateOffset, setDateOffset] = useState(0);
+  const [direction, setDirection] = useState(0);
+  const [showFilter, setShowFilter] = useState<'both' | 'tasks' | 'rituals'>('both');
 
   const selectedHabit = habits.find(h => h.id === selectedHabitId);
 
-  if (selectedHabit) {
-    return <RitualStats habit={selectedHabit} onBack={() => setSelectedHabitId(null)} />;
+  const today = new Date();
+  const activeHabits = habits.filter(h => !h.archived);
+
+  // ── Date navigation ───────────────────────────────────────────────────────
+  let currentDate = today;
+  let dateLabel = "";
+
+  if (activeTab === 'daily') {
+    currentDate = addWeeks(today, dateOffset);
+    dateLabel = dateOffset === 0 ? "This Week"
+      : dateOffset === -1 ? "Last Week"
+      : dateOffset === 1 ? "Next Week"
+      : `${Math.abs(dateOffset)} Weeks ${dateOffset < 0 ? 'Ago' : 'Ahead'}`;
+  } else if (activeTab === 'weekly') {
+    currentDate = addMonths(today, dateOffset);
+    dateLabel = dateOffset === 0 ? "This Month"
+      : dateOffset === -1 ? "Last Month"
+      : format(currentDate, 'MMMM yyyy');
+  } else {
+    currentDate = addMonths(today, dateOffset * 6);
+    dateLabel = dateOffset === 0 ? "Last 6 Months"
+      : (() => { const s = subMonths(currentDate, 5); return `${format(s, 'MMM yyyy')} – ${format(currentDate, 'MMM yyyy')}`; })();
   }
 
-  const todaysHabits = habits.filter(isHabitDueToday);
+  // ── Tasks filtered by tab ─────────────────────────────────────────────────
+  const activeTasks = tasks.filter(t => !t.isCompleted);
 
-  const today = startOfDay(new Date());
+  const { tabTasks, tabLabel } = useMemo(() => {
+    const todayStart = startOfDay(today);
 
-  const activeTasks = tasks.filter(task => !task.isCompleted);
+    if (activeTab === 'daily') {
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+      const weekEnd   = endOfWeek(currentDate,   { weekStartsOn: 0 });
 
-  const todaysTasks = activeTasks.filter(task => {
-    if (!task.dueDate) return false; // No due date = backlog
-    const due = startOfDay(parseISO(task.dueDate));
-    return isSameDay(due, today) || isBefore(due, today); // Today or Overdue
-  });
+      if (dateOffset === 0) {
+        // Today: incomplete tasks due today or overdue (past due)
+        const due = activeTasks.filter(t => {
+          if (!t.dueDate) return false;
+          const d = startOfDay(parseISO(t.dueDate));
+          return isSameDay(d, todayStart) || isBefore(d, todayStart);
+        });
+        // Also show upcoming this week
+        const upcoming = activeTasks.filter(t => {
+          if (!t.dueDate) return false;
+          const d = startOfDay(parseISO(t.dueDate));
+          return !isSameDay(d, todayStart) && !isBefore(d, todayStart) && d <= weekEnd;
+        });
+        return { tabTasks: { due, upcoming }, tabLabel: "Today's Quests" };
+      } else {
+        // Past/future week: incomplete tasks due in that week only
+        const week = activeTasks.filter(t => {
+          if (!t.dueDate) return false;
+          const d = startOfDay(parseISO(t.dueDate));
+          return d >= weekStart && d <= weekEnd;
+        });
+        return { tabTasks: { due: week, upcoming: [] }, tabLabel: dateLabel + " Quests" };
+      }
+    }
 
-  const upcomingTasks = activeTasks.filter(task => {
-    if (!task.dueDate) return false;
-    const due = startOfDay(parseISO(task.dueDate));
-    return !isSameDay(due, today) && !isBefore(due, today);
-  });
+    if (activeTab === 'weekly') {
+      // Incomplete tasks due this month only
+      const due = activeTasks.filter(t => {
+        if (!t.dueDate) return false;
+        return isSameMonth(parseISO(t.dueDate), currentDate);
+      });
+      return { tabTasks: { due, upcoming: [] }, tabLabel: format(currentDate, 'MMMM') + ' Quests' };
+    }
+
+    // Monthly — last 6 months window, incomplete only
+    const sixAgo = subMonths(currentDate, 5);
+    const windowStart = startOfDay(new Date(sixAgo.getFullYear(), sixAgo.getMonth(), 1));
+    const due = activeTasks.filter(t => {
+      if (!t.dueDate) return false;
+      const d = parseISO(t.dueDate);
+      return d >= windowStart && d <= currentDate;
+    });
+    return { tabTasks: { due, upcoming: [] }, tabLabel: 'Recent Quests' };
+  }, [activeTab, dateOffset, activeTasks, tasks, currentDate]);
+
+  // ── Habits filtered by tab + sorted: needs-action first ──────────────────
+  const visibleHabits = useMemo(() => {
+    const todayStart = startOfDay(new Date());
+
+    // 1. Filter by tab
+    let filtered: typeof activeHabits;
+    if (activeTab === 'daily') {
+      filtered = activeHabits.filter(h =>
+        ['daily', 'every_2_days', 'every_3_days', 'every_4_days', 'specific_days'].includes(h.frequency)
+      );
+    } else if (activeTab === 'weekly') {
+      filtered = activeHabits.filter(h => h.frequency === 'weekly');
+    } else {
+      filtered = activeHabits.filter(h => h.frequency === 'monthly');
+    }
+
+    // 2. Determine "needs action" per frequency type
+    const needsAction = (h: typeof activeHabits[0]): boolean => {
+      if (h.frequency === 'weekly') {
+        // Needs action if no completion this week
+        return !h.completions.some(c =>
+          isSameWeek(parseISO(c.completedAt), new Date(), { weekStartsOn: 0 })
+        );
+      }
+      if (h.frequency === 'monthly') {
+        // Needs action if no completion this month
+        return !h.completions.some(c =>
+          isSameMonth(parseISO(c.completedAt), new Date())
+        );
+      }
+      // Daily-type: due today and not yet done
+      if (!isHabitDueToday(h)) return false;
+      return !h.completions.some(
+        c => startOfDay(parseISO(c.completedAt)).getTime() === todayStart.getTime()
+      );
+    };
+
+    // 3. Sort: needs-action (0) before done/not-due (1), stable within each group
+    return [...filtered].sort((a, b) => (needsAction(a) ? 0 : 1) - (needsAction(b) ? 0 : 1));
+  }, [activeHabits, activeTab]);
+
+  const hasTasks = (tabTasks as any).due.length > 0 || (tabTasks as any).upcoming?.length > 0;
+
+  const showTasks   = showFilter === 'both' || showFilter === 'tasks';
+  const showRituals = showFilter === 'both' || showFilter === 'rituals';
+  const hasContent  = (showRituals && visibleHabits.length > 0) || (showTasks && hasTasks);
 
   return (
-    <div className="space-y-8 pb-32">
-      {/* Habits Section */}
-      {todaysHabits.length > 0 && (
-        <section className="space-y-4">
-          <h2 className="text-xl font-black font-headline uppercase tracking-widest text-muted-foreground/80 px-1">
-            Rituals
-          </h2>
-          <div className="grid gap-3">
-            <AnimatePresence mode="popLayout">
-              {todaysHabits.map(habit => (
-                <HabitItem
-                  key={habit.id}
-                  habit={habit}
-                  onToggle={onToggleHabit}
-                  onUpdate={onUpdateHabit}
-                  onDelete={onDeleteHabit}
-                  onViewStats={setSelectedHabitId}
-                />
+    <>
+      {selectedHabit && (
+        <RitualStats habit={selectedHabit} onBack={() => setSelectedHabitId(null)} />
+      )}
+      {!selectedHabit && (
+    <div className="flex flex-col gap-0 w-full max-w-5xl mx-auto pb-32">
+
+      {/* ── Sticky header: tabs + date nav ────────────────────────────────── */}
+      <div className="sticky top-0 z-30 pt-3 pb-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full">
+
+          {/* Row 1: Tab switcher + date nav */}
+          <div className="flex items-center justify-between w-full gap-2">
+            {/* Tab pills */}
+            <div className="flex items-center gap-1.5 bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full px-2 py-1.5">
+              <div className="relative flex items-center bg-[#F1F4F9] p-0.5 rounded-full border border-[#E2E8F0] gap-0.5">
+                {(['daily', 'weekly', 'monthly'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => { setDirection(0); setActiveTab(tab); setDateOffset(0); }}
+                    className={cn(
+                      "relative px-3 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 cursor-pointer z-10",
+                      activeTab === tab ? "text-[#1E293B]" : "text-[#94A3B8] hover:text-[#64748B]"
+                    )}
+                  >
+                    {activeTab === tab && (
+                      <motion.div
+                        layoutId="combined-tab-pill"
+                        className="absolute inset-0 bg-white rounded-full shadow-sm border border-[#E2E8F0]"
+                        style={{ zIndex: -1 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                      />
+                    )}
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Date navigator */}
+            <div className="flex items-center gap-1 bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full px-2 py-1.5">
+              <button
+                onClick={() => { setDirection(-1); setDateOffset(p => p - 1); }}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#F1F4F9] transition-all active:scale-90"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 text-[#64748B]" />
+              </button>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={`${activeTab}-${dateOffset}`}
+                  initial={{ opacity: 0, y: direction > 0 ? -6 : 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: direction > 0 ? 6 : -6 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#1E293B] min-w-[80px] sm:min-w-[100px] text-center"
+                >
+                  {dateLabel}
+                </motion.span>
+              </AnimatePresence>
+              <button
+                onClick={() => { setDirection(1); setDateOffset(p => p + 1); }}
+                disabled={dateOffset >= 0}
+                className={cn(
+                  "w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90",
+                  dateOffset >= 0 ? "opacity-25 cursor-not-allowed" : "hover:bg-[#F1F4F9]"
+                )}
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-[#64748B]" />
+              </button>
+            </div>
+          </div>
+
+          {/* Row 2: View filter (icon + label, responsive) */}
+          <div className="flex items-center w-full">
+            <div className="flex items-center bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full p-1 gap-0.5 w-full">
+              {([
+                { key: 'both',    label: 'Both',    Icon: LayoutGrid },
+                { key: 'tasks',   label: 'Tasks',   Icon: ListTodo },
+                { key: 'rituals', label: 'Rituals', Icon: Flame },
+              ] as const).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setShowFilter(key)}
+                  className={cn(
+                    "relative flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 z-10",
+                    showFilter === key ? "text-[#1E293B]" : "text-[#94A3B8] hover:text-[#64748B]"
+                  )}
+                >
+                  {showFilter === key && (
+                    <motion.div
+                      layoutId="filter-pill"
+                      className="absolute inset-0 bg-[#F1F4F9] rounded-full border border-[#E2E8F0]"
+                      style={{ zIndex: -1 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  <Icon className={cn("w-3.5 h-3.5 flex-shrink-0", key === 'rituals' && showFilter === key && "fill-orange-400 text-orange-400")} />
+                  <span className="hidden sm:inline">{label}</span>
+                </button>
               ))}
-            </AnimatePresence>
-          </div>
-        </section>
-      )}
-
-      {/* Tasks Section */}
-      <section className="space-y-4">
-
-        {todaysTasks.length > 0 ? (
-          <TaskList
-            tasks={todaysTasks}
-            listType="active"
-            onToggleTask={onToggleTask}
-            onDeleteTask={onDeleteTask}
-            onEditTask={onEditTask}
-            onAddSubtask={onAddSubtask}
-            onToggleSubtask={onToggleSubtask}
-            setCelebrating={setCelebrating}
-          />
-        ) : (
-          <div className="border-2 border-b-[6px] border-muted-foreground/20 rounded-[2rem] bg-card/40 flex items-center p-5 gap-4">
-            <div className="h-9 w-9 rounded-2xl border-2 border-dashed border-muted-foreground/30 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-muted-foreground/40" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path>
-              </svg>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-lg font-bold text-muted-foreground/60">No quests due today</p>
-              <p className="text-sm text-muted-foreground/40">Add a quest or check your backlog</p>
             </div>
           </div>
-        )}
-      </section>
+        </div>
+      </div>
 
-      {/* Upcoming Quests Section */}
-      {upcomingTasks.length > 0 && (
-        <section className="space-y-6 pt-4">
-          <TaskList
-            tasks={upcomingTasks}
-            listType="active"
-            onToggleTask={onToggleTask}
-            onDeleteTask={onDeleteTask}
-            onEditTask={onEditTask}
-            onAddSubtask={onAddSubtask}
-            onToggleSubtask={onToggleSubtask}
-            setCelebrating={setCelebrating}
-          />
-        </section>
-      )}
+
+      {/* ── Content ───────────────────────────────────────────────────────── */}
+      <div className="overflow-hidden relative w-full pt-2">
+        <AnimatePresence mode="popLayout" custom={direction} initial={false}>
+          <motion.div
+            key={`${activeTab}-${dateOffset}`}
+            custom={direction}
+            variants={{
+              initial: (d: number) => ({ opacity: 0, x: d === 0 ? 0 : d > 0 ? 80 : -80 }),
+              animate: { opacity: 1, x: 0 },
+              exit:    (d: number) => ({ opacity: 0, x: d === 0 ? 0 : d > 0 ? -80 : 80 }),
+            }}
+            initial="initial" animate="animate" exit="exit"
+            transition={{ duration: 0.25, ease: [0.04, 0.62, 0.23, 0.98] }}
+            className="flex flex-col gap-8"
+          >
+            {!hasContent ? (
+              /* Empty state */
+              <div className="py-28 max-w-md mx-auto flex flex-col items-center justify-center text-center gap-6 bg-[#F1F4F9]/30 rounded-[3rem] border-2 border-b-8 border-dashed border-[#E2E8F0]">
+                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center border-2 border-b-4 border-[#E2E8F0] shadow-inner">
+                  <Target className="w-12 h-12 text-[#CBD5E1]" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-[#1E293B] uppercase tracking-tight">Nothing here</h3>
+                  <p className="text-[#64748B]/60 font-medium mt-1">No rituals or quests for this period.</p>
+                </div>
+                <AddHabitDialog onAddHabit={onAddHabit}>
+                  <button className="mt-2 border-2 border-b-[6px] border-[#4f46e5] bg-[#6366f1] text-white font-black uppercase tracking-widest active:translate-y-[2px] active:border-b-[4px] transition-all rounded-2xl py-4 px-8 text-base relative overflow-hidden">
+                    <div className="absolute inset-x-0 top-0 h-px bg-white/40 z-10 pointer-events-none" />
+                    Create Ritual
+                  </button>
+                </AddHabitDialog>
+              </div>
+            ) : (
+              <>
+                {/* ── Tasks section ────────────────────────────────────── */}
+                {showTasks && hasTasks && (
+                  <section className="space-y-3">
+                    <TaskList
+                      tasks={(tabTasks as any).due}
+                      listType="active"
+                      onToggleTask={onToggleTask}
+                      onDeleteTask={onDeleteTask}
+                      onEditTask={onEditTask}
+                      onAddSubtask={onAddSubtask}
+                      onToggleSubtask={onToggleSubtask}
+                      setCelebrating={setCelebrating}
+                    />
+                    {(tabTasks as any).upcoming?.length > 0 && (
+                      <TaskList
+                        tasks={(tabTasks as any).upcoming}
+                        listType="active"
+                        onToggleTask={onToggleTask}
+                        onDeleteTask={onDeleteTask}
+                        onEditTask={onEditTask}
+                        onAddSubtask={onAddSubtask}
+                        onToggleSubtask={onToggleSubtask}
+                        setCelebrating={setCelebrating}
+                      />
+                    )}
+                  </section>
+                )}
+
+                {/* ── Rituals section ──────────────────────────────────── */}
+                {showRituals && visibleHabits.length > 0 && (
+                  <section className="space-y-3">
+                    <div className="flex items-center gap-2 px-1">
+                      <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
+                      <h2 className="text-xs font-black uppercase tracking-[0.15em] text-muted-foreground/70">
+                        Rituals
+                      </h2>
+                    </div>
+                    <div className="flex flex-col gap-0">
+                      <AnimatePresence mode="popLayout">
+                        {visibleHabits.map(habit => (
+                          <HabitItem
+                            key={habit.id}
+                            habit={habit}
+                            currentDate={currentDate}
+                            onToggle={onToggleHabit}
+                            onUpdate={onUpdateHabit}
+                            onDelete={onDeleteHabit}
+                            onViewStats={setSelectedHabitId}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
+      )}
+    </>
   );
 }

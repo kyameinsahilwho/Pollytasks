@@ -5,7 +5,9 @@ import { TaskView } from '@/components/task-view';
 
 export default function HomePage() {
   const {
+    habits,
     tasks,
+    addHabit,
     toggleHabitCompletion,
     updateHabit,
     deleteHabit,
@@ -14,13 +16,14 @@ export default function HomePage() {
     setTaskToEdit,
     addSubtask,
     toggleSubtaskCompletion,
-    setCelebrating
+    setCelebrating,
   } = useTaskQuest();
 
   return (
     <TaskView
-      habits={[]}
+      habits={habits}
       tasks={tasks}
+      onAddHabit={addHabit}
       onToggleHabit={toggleHabitCompletion}
       onUpdateHabit={updateHabit}
       onDeleteHabit={deleteHabit}

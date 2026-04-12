@@ -1,24 +1,5 @@
-"use client";
-
-import { useTaskQuest } from '@/context/task-quest-context';
-import { HabitTracker } from '@/components/habit-tracker';
+import { redirect } from 'next/navigation';
 
 export default function HabitsPage() {
-  const {
-    habits,
-    addHabit,
-    updateHabit,
-    toggleHabitCompletion,
-    deleteHabit
-  } = useTaskQuest();
-
-  return (
-    <HabitTracker
-      habits={habits}
-      onAddHabit={addHabit}
-      onUpdateHabit={updateHabit}
-      onToggleHabit={toggleHabitCompletion}
-      onDeleteHabit={deleteHabit}
-    />
-  );
+  redirect('/');
 }

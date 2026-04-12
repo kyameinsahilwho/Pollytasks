@@ -332,6 +332,7 @@ export function RitualStats({ habit, onBack }: RitualStatsProps) {
           <div className="flex flex-wrap gap-1 justify-center">
             {eachDayOfInterval({ start: startOfYear(new Date(selectedYear, 0, 1)), end: endOfYear(new Date(selectedYear, 0, 1)) }).map((day, i) => {
               const isCompleted = completionDates.some(d => isSameDay(d, day));
+              const isCurrentDay = isSameDay(day, new Date());
               let isScheduled = true;
               
               if (day < startOfDay(parseISO(habit.createdAt))) {
@@ -345,20 +346,35 @@ export function RitualStats({ habit, onBack }: RitualStatsProps) {
                 isScheduled = diffDays >= 0 && diffDays % interval === 0;
               }
 
-              return (
+              return isCurrentDay ? (
+                <div key={i} className="relative flex-shrink-0 w-2.5 h-2.5">
+                  <div className={cn(
+                    "absolute inset-0 rounded-[2px] animate-ping",
+                    isCompleted ? "bg-[#58cc02]/40" : "bg-emerald-400/25"
+                  )} style={{ animationDuration: '2s' }} />
+                  <div
+                    title={format(day, 'MMM d, yyyy')}
+                    className={cn(
+                      "relative w-full h-full rounded-[2px]",
+                      isCompleted ? "bg-[#58cc02]" : "bg-emerald-100 border border-emerald-300/60"
+                    )}
+                  />
+                </div>
+              ) : (
                 <div
                   key={i}
                   title={format(day, 'MMM d, yyyy')}
                   className={cn(
-                    "w-2.5 h-2.5 rounded-[2px] transition-all duration-200",
-                    isCompleted 
-                      ? "bg-[#58cc02] shadow-[0_0_8px_rgba(88,204,2,0.4)]" 
-                      : isScheduled 
-                        ? "bg-[#F1F4F9] border border-[#E2E8F0]" 
+                    "w-2.5 h-2.5 rounded-[2px] transition-colors duration-200",
+                    isCompleted
+                      ? "bg-[#58cc02] shadow-[0_0_5px_rgba(88,204,2,0.3)]"
+                      : isScheduled
+                        ? "bg-[#F1F4F9] border border-[#E2E8F0]"
                         : "bg-gray-100/20"
                   )}
                 />
               );
+
             })}
           </div>
         </div>

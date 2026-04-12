@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Edit2, Trash2, Pin, MoreVertical, Tag } from "lucide-react";
+import { Edit2, Trash2, Pin, MoreVertical, Tag, Mic } from "lucide-react";
 import { Weblog } from "@/hooks/use-weblogs";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -143,25 +143,36 @@ export function WeblogItem({ weblog, onEdit, onDelete, onTogglePin }: WeblogItem
                 )}
             </div>
 
-            {/* Tags */}
-            {weblog.tags && weblog.tags.length > 0 && (
-                <div className="flex items-center gap-1 flex-wrap mt-auto">
-                    {weblog.tags.slice(0, 3).map(tag => (
-                        <Badge
-                            key={tag}
-                            variant="secondary"
-                            className="bg-white/60 text-slate-500 font-medium rounded-md px-1.5 py-0 text-[9px] md:text-[10px] border-0"
-                        >
-                            #{tag}
-                        </Badge>
-                    ))}
-                    {weblog.tags.length > 3 && (
-                        <span className="text-[9px] md:text-[10px] text-slate-400 font-medium">
-                            +{weblog.tags.length - 3}
-                        </span>
-                    )}
-                </div>
-            )}
+            {/* Tags and Audio Indicator */}
+            <div className="flex items-center gap-1 flex-wrap mt-auto">
+                {weblog.rawTranscript && (
+                    <Badge
+                        variant="secondary"
+                        className="bg-indigo-100 text-indigo-500 font-medium rounded-md px-1.5 py-0 border-0 flex items-center gap-1"
+                    >
+                        <Mic className="w-3 h-3" />
+                        <span className="text-[9px] md:text-[10px]">Audio</span>
+                    </Badge>
+                )}
+                {weblog.tags && weblog.tags.length > 0 && (
+                    <>
+                        {weblog.tags.slice(0, 3).map(tag => (
+                            <Badge
+                                key={tag}
+                                variant="secondary"
+                                className="bg-white/60 text-slate-500 font-medium rounded-md px-1.5 py-0 text-[9px] md:text-[10px] border-0"
+                            >
+                                #{tag}
+                            </Badge>
+                        ))}
+                        {weblog.tags.length > 3 && (
+                            <span className="text-[9px] md:text-[10px] text-slate-400 font-medium">
+                                +{weblog.tags.length - 3}
+                            </span>
+                        )}
+                    </>
+                )}
+            </div>
 
             {/* Corner Fold Effect */}
             <div className="absolute top-0 right-0 w-6 h-6 md:w-8 md:h-8 pointer-events-none overflow-hidden rounded-tr-xl">

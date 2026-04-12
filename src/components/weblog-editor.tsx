@@ -25,12 +25,16 @@ import { cn } from "@/lib/utils";
 import { CompactIconPicker } from "./icon-picker";
 import { Badge } from "@/components/ui/badge";
 import { WeblogFolder } from "@/hooks/use-weblog-folders";
+import { useMutation, useAction } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Mic, Square, Loader2, Eye, EyeOff } from "lucide-react";
+import { marked } from "marked";
 
 // Default color for weblog icons
 const DEFAULT_ICON_COLOR = "bg-amber-100";
@@ -57,6 +61,199 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
     const [showCloseWarning, setShowCloseWarning] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
+    
+    // Audio feature states
+    const [isRecording, setIsRecording] = useState(false);
+    const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+    const [rawTranscript, setRawTranscript] = useState<string | undefined>(undefined);
+    const [showRawTranscript, setShowRawTranscript] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0);
+    const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const [isRecordingModalOpen, setIsRecordingModalOpen] = useState(false);
+    
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const recorderMimeTypeRef = useRef<string>("audio/webm");
+
+    const processAudioNote = useAction(api.audio.processAudioNote);
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const preferredMimeTypes = [
+                "audio/webm;codecs=opus",
+                "audio/webm",
+                "audio/mp4",
+            ];
+
+            const selectedMimeType = preferredMimeTypes.find(
+                (mime) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mime)
+            );
+
+            const mediaRecorder = selectedMimeType
+                ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+                : new MediaRecorder(stream);
+
+            recorderMimeTypeRef.current = selectedMimeType || mediaRecorder.mimeType || "audio/webm";
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                setIsProcessingAudio(true);
+                // Reset recording timer and animations
+                if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+                if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+                
+                if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                    audioContextRef.current.close().catch(console.error);
+                }
+                audioContextRef.current = null;
+                analyserRef.current = null;
+                animationFrameRef.current = null;
+                
+                setRecordingTime(0);
+
+                const audioBlob = new Blob(audioChunksRef.current, { type: recorderMimeTypeRef.current || "audio/webm" });
+                
+                try {
+                    // 1. Convert audioBlob to base64
+                    const reader = new FileReader();
+                    const base64Promise = new Promise<string>((resolve) => {
+                        reader.onloadend = () => {
+                            const base64String = (reader.result as string).split(',')[1];
+                            resolve(base64String);
+                        };
+                    });
+                    reader.readAsDataURL(audioBlob);
+                    const audioData = await base64Promise;
+
+                    // 2. Call Gemini action
+                    const aiResponse = await processAudioNote({ 
+                        audioData, 
+                        contentType: audioBlob.type 
+                    });
+                    
+                    // 3. Update editor
+                    if (aiResponse.title) setTitle(aiResponse.title);
+                    if (aiResponse.emoji) setEmoji(aiResponse.emoji);
+                    if (aiResponse.rawTranscript) setRawTranscript(aiResponse.rawTranscript);
+                    
+                    // Append structured content
+                    if (editorRef.current && aiResponse.structuredContent) {
+                        const htmlContent = marked.parse(aiResponse.structuredContent, { 
+                            gfm: true, 
+                            breaks: true 
+                        });
+                        const currentContent = editorRef.current.innerHTML;
+                        editorRef.current.innerHTML = currentContent 
+                            ? currentContent + '<br><br>' + htmlContent
+                            : htmlContent as string;
+                    }
+                } catch (error) {
+                    console.error("Failed to process audio:", error);
+                    alert("Failed to process audio note: " + error);
+                } finally {
+                    setIsProcessingAudio(false);
+                    // Stop tracks
+                    stream.getTracks().forEach(track => track.stop());
+                }
+            };
+
+            mediaRecorder.start();
+            setIsRecording(true);
+            setIsRecordingModalOpen(true);
+            setRecordingTime(0);
+            
+            // Audio visualizer setup
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            audioContextRef.current = audioContext;
+            analyserRef.current = analyser;
+            
+            const updateVisualizer = () => {
+                if (!analyserRef.current || !canvasRef.current) return;
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                analyserRef.current.getByteFrequencyData(dataArray);
+                
+                const width = canvas.width;
+                const height = canvas.height;
+                ctx.clearRect(0, 0, width, height);
+                
+                // Draw smooth symmetrical wave
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#6366f1'; // indigo-500
+                ctx.lineCap = 'round';
+                
+                const sliceWidth = width / bufferLength;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    // Use frequency data to determine bar height
+                    const v = dataArray[i] / 255.0;
+                    const barHeight = v * height * 0.8; // Max 80% height
+                    
+                    const y1 = (height - barHeight) / 2;
+                    const y2 = (height + barHeight) / 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(x, y1);
+                    ctx.lineTo(x, y2);
+                    ctx.stroke();
+
+                    x += sliceWidth + 1; // Add gap
+                }
+
+                animationFrameRef.current = requestAnimationFrame(updateVisualizer);
+            };
+            
+            // Delay visualizer start slightly to ensure canvas is rendered
+            setTimeout(() => {
+                updateVisualizer();
+            }, 100);
+
+            recordingTimerRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+        } catch (error) {
+            console.error("Error accessing microphone:", error);
+            alert("Could not access microphone.");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            setIsRecordingModalOpen(false);
+            // Most cleanup happens in onstop to avoid double-closing AudioContext
+        }
+    };
+
+    const formatTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+    
     const [activeFormats, setActiveFormats] = useState<{
         bold: boolean;
         italic: boolean;
@@ -84,6 +281,17 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
     });
     const editorRef = useRef<HTMLDivElement>(null);
     const tagInputRef = useRef<HTMLInputElement>(null);
+
+    // Cleanup recording resources on unmount
+    useEffect(() => {
+        return () => {
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+            if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                audioContextRef.current.close().catch(console.error);
+            }
+        };
+    }, []);
 
     // Detect mobile screen and set fullscreen by default
     useEffect(() => {
@@ -159,11 +367,12 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
             emoji,
             folderId,
             tags,
+            rawTranscript,
             content: editorRef.current?.innerHTML || "",
             savedAt: Date.now()
         };
         localStorage.setItem(draftKey, JSON.stringify(draft));
-    }, [title, emoji, folderId, tags, draftKey]);
+    }, [title, emoji, folderId, tags, rawTranscript, draftKey]);
 
     // Load draft from localStorage
     const loadDraft = useCallback(() => {
@@ -193,6 +402,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 setEmoji(draft.emoji || "📝");
                 setFolderId(draft.folderId ?? initialFolderId ?? null);
                 setTags(draft.tags || []);
+                setRawTranscript(draft.rawTranscript);
                 setTimeout(() => {
                     if (editorRef.current) {
                         editorRef.current.innerHTML = draft.content || "";
@@ -204,6 +414,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 setEmoji(weblog?.emoji || "📝");
                 setFolderId(weblog ? (weblog.folderId ?? null) : (initialFolderId ?? null));
                 setTags(weblog?.tags || []);
+                setRawTranscript(weblog?.rawTranscript);
                 setTimeout(() => {
                     if (editorRef.current) {
                         editorRef.current.innerHTML = weblog?.content || "";
@@ -272,7 +483,8 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 emoji,
                 folderId: folderId || undefined,
                 tags,
-                isPinned: weblog?.isPinned
+                isPinned: weblog?.isPinned,
+                rawTranscript
             });
             clearDraft(); // Clear draft on successful save
             onClose();
@@ -1098,6 +1310,48 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                         
                         <div className="w-px h-5 bg-slate-200 mx-1 md:mx-2" />
                         
+                        <button
+                            onClick={startRecording}
+                            disabled={isProcessingAudio || isRecording}
+                            title="Record Audio Note"
+                            className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all font-bold text-xs md:text-sm shadow-sm border whitespace-nowrap",
+                                "bg-indigo-500 hover:bg-indigo-600 text-white border-indigo-600 hover:border-indigo-700",
+                                (isProcessingAudio || isRecording) && "opacity-50 cursor-not-allowed bg-slate-400 border-slate-500"
+                            )}
+                        >
+                            {isProcessingAudio ? (
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Analyzing...</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <Mic className="w-4 h-4" />
+                                    <span>Record Note</span>
+                                </div>
+                            )}
+                        </button>
+                        
+                        {rawTranscript && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setShowRawTranscript(!showRawTranscript)}
+                                className={cn(
+                                    "flex items-center gap-1.5 px-3 h-8 rounded-lg font-bold text-xs transition-all",
+                                    showRawTranscript 
+                                        ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" 
+                                        : "text-slate-500 hover:bg-slate-100"
+                                )}
+                            >
+                                {showRawTranscript ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                {showRawTranscript ? "Hide Transcript" : "View Transcript"}
+                            </Button>
+                        )}
+                        
+                        <div className="w-px h-5 bg-slate-200 mx-1 md:mx-2" />
+                        
                         <ToolbarButton onClick={formatBold} icon={<Bold className="w-4 h-4" />} tooltip="Bold (Ctrl+B)" active={activeFormats.bold} />
                         <ToolbarButton onClick={formatItalic} icon={<Italic className="w-4 h-4" />} tooltip="Italic (Ctrl+I)" active={activeFormats.italic} />
                         <ToolbarButton onClick={formatUnderline} icon={<Underline className="w-4 h-4" />} tooltip="Underline (Ctrl+U)" active={activeFormats.underline} />
@@ -1148,6 +1402,19 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
                 {/* Rich Text Editor - WYSIWYG */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-white/40 dark:bg-black/20 custom-scrollbar relative">
+                    {/* Raw Transcript View */}
+                    {showRawTranscript && rawTranscript && (
+                        <div className="mb-6 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-900/20 border-2 border-indigo-100/50 dark:border-indigo-800/30 animate-in slide-in-from-top-2 duration-300">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Mic className="w-3.5 h-3.5 text-indigo-500" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Raw Transcription</span>
+                            </div>
+                            <p className="text-sm text-slate-600 dark:text-slate-300 italic leading-relaxed">
+                                "{rawTranscript}"
+                            </p>
+                        </div>
+                    )}
+
                     {/* Floating Toolbar */}
                     {floatingToolbarPos && (
                         <div
@@ -1255,6 +1522,45 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                     />
                 </div>
 
+            </DialogContent>
+        </Dialog>
+
+        {/* Recording Modal */}
+        <Dialog open={isRecordingModalOpen} onOpenChange={(open) => !open && stopRecording()}>
+            <DialogContent hideCloseButton className="max-w-sm w-[90vw] p-0 overflow-hidden rounded-3xl border-4 border-indigo-100 shadow-2xl bg-white">
+                <DialogTitle className="sr-only">Recording Audio Note</DialogTitle>
+                <div className="flex flex-col items-center p-8 gap-6">
+                    <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center relative">
+                        <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />
+                        <Mic className="w-10 h-10 text-red-500 relative z-10" />
+                    </div>
+
+                    <div className="flex flex-col items-center gap-1">
+                        <span className="text-2xl font-black text-slate-800 tabular-nums">
+                            {formatTime(recordingTime)}
+                        </span>
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+                            Recording...
+                        </span>
+                    </div>
+
+                    <div className="w-full h-24 bg-slate-50 rounded-2xl border-2 border-slate-100 overflow-hidden relative">
+                        <canvas 
+                            ref={canvasRef} 
+                            width={300} 
+                            height={100} 
+                            className="w-full h-full"
+                        />
+                    </div>
+
+                    <Button
+                        onClick={stopRecording}
+                        className="w-full h-14 bg-red-500 hover:bg-red-600 text-white font-black text-lg rounded-2xl border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-3"
+                    >
+                        <Square className="w-6 h-6 fill-current" />
+                        Stop Recording
+                    </Button>
+                </div>
             </DialogContent>
         </Dialog>
 

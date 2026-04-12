@@ -527,6 +527,79 @@ export const useHabits = (initialHabits?: Doc<"habits">[]) => {
 
   }, [habits, addCompletionMutation, removeCompletionMutation, updateHabitMutation, isAuthenticated, applyOptimisticUpdate, clearOptimisticUpdate]);
 
+  const addHabitCompletion = useCallback(async (habitId: string, date: string) => {
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit) return;
+
+    const targetDate = startOfDay(parseISO(date)).toISOString();
+    const newCompletions = [...habit.completions, { id: crypto.randomUUID(), habitId: habitId, completedAt: targetDate }];
+
+    // Recalculate streak
+    const sortedCompletions = [...newCompletions]
+      .map(c => startOfDay(parseISO(c.completedAt)))
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    let currentStreak = 0;
+    if (sortedCompletions.length > 0) {
+      const lastCompletion = sortedCompletions[sortedCompletions.length - 1];
+      const maxGap = calculateMaxGap(habit.frequency, habit.customDays);
+      if (differenceInCalendarDays(new Date(), lastCompletion) <= maxGap) {
+        currentStreak = 1;
+        for (let i = sortedCompletions.length - 2; i >= 0; i--) {
+          const diff = differenceInCalendarDays(sortedCompletions[i + 1], sortedCompletions[i]);
+          if (diff <= maxGap) currentStreak++;
+          else break;
+        }
+      }
+    }
+
+    const bestStreak = Math.max(habit.bestStreak, currentStreak);
+    const yearlyStats = calculateYearlyStats(newCompletions, habit.frequency, habit.createdAt, habit.customDays);
+    const xp = calculateHabitXP(newCompletions, habit.frequency, habit.customDays);
+
+    if (isAuthenticated) {
+      applyOptimisticUpdate(habitId, {
+        completions: newCompletions,
+        currentStreak,
+        bestStreak,
+        totalCompletions: newCompletions.length,
+        yearlyStats,
+        xp
+      });
+
+      try {
+        await addCompletionMutation({ habitId: habitId as Id<"habits">, completedAt: targetDate });
+        await updateHabitMutation({
+          id: habitId as Id<"habits">,
+          currentStreak,
+          bestStreak,
+          totalCompletions: newCompletions.length,
+          yearlyAchieved: yearlyStats.achieved,
+          yearlyExpected: yearlyStats.totalExpected,
+          statsYear: yearlyStats.year
+        });
+        clearOptimisticUpdate(habitId);
+        await updateChallengeProgressMutation({ type: "habit", value: 1 });
+      } catch (error) {
+        console.error("Mutation failed, rolling back:", error);
+        clearOptimisticUpdate(habitId);
+        throw error;
+      }
+    } else {
+      setLocalHabits(prev => prev.map(h =>
+        h.id === habitId ? {
+          ...h,
+          currentStreak,
+          bestStreak,
+          totalCompletions: newCompletions.length,
+          yearlyStats,
+          completions: newCompletions,
+          xp
+        } : h
+      ));
+    }
+  }, [habits, addCompletionMutation, updateHabitMutation, isAuthenticated, applyOptimisticUpdate, clearOptimisticUpdate, updateChallengeProgressMutation]);
+
   const updateHabit = useCallback(async (id: string, updates: Partial<Omit<Habit, 'id' | 'createdAt' | 'completions'>>) => {
     const handleLocalUpdate = () => {
       setLocalHabits(prev => prev.map(h => {
@@ -615,6 +688,7 @@ export const useHabits = (initialHabits?: Doc<"habits">[]) => {
     updateHabit,
     deleteHabit,
     toggleHabitCompletion,
+    addHabitCompletion,
     // isInitialLoad is false if we have cached data (localStorage-first approach)
     isInitialLoad: isAuthenticated ? (rawHabits === undefined && cachedHabits === null && !initialHabits) : !isLocalLoaded,
   };

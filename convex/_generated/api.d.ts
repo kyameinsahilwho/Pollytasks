@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as audio from "../audio.js";
 import type * as challenges from "../challenges.js";
 import type * as habits from "../habits.js";
 import type * as http from "../http.js";
@@ -27,6 +28,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  audio: typeof audio;
   challenges: typeof challenges;
   habits: typeof habits;
   http: typeof http;

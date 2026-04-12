@@ -98,16 +98,8 @@ export function DesktopSidebar({
                             href="/"
                             isActive={isActive('/')}
                             icon="swords"
-                            label="Quests"
+                            label="Today"
                             color="green"
-                            isCollapsed={isCollapsed}
-                        />
-                        <SidebarItem
-                            href="/habits"
-                            isActive={isActive('/habits')}
-                            icon="water_drop"
-                            label="Rituals"
-                            color="blue"
                             isCollapsed={isCollapsed}
                         />
                         <SidebarItem
@@ -127,10 +119,10 @@ export function DesktopSidebar({
                             isCollapsed={isCollapsed}
                         />
                         <SidebarItem
-                            href="/weblog"
-                            isActive={isActive('/weblog')}
+                            href="/notes"
+                            isActive={isActive('/notes')}
                             icon="menu_book"
-                            label="Weblog"
+                            label="Notes"
                             color="amber"
                             isCollapsed={isCollapsed}
                         />

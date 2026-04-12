@@ -101,7 +101,7 @@ export function MobileBottomNav({
 
             <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 transition-all duration-300 bg-card/95 border-t-2 border-border backdrop-blur-md pb-safe">
                 <div className="flex flex-col">
-                    <div className="grid w-full grid-cols-5 p-2 h-auto bg-transparent border-0 rounded-none gap-1 relative">
+                    <div className="grid w-full grid-cols-4 p-2 h-auto bg-transparent border-0 rounded-none gap-1 relative">
                         <Link
                             href="/"
                             className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/')
@@ -110,16 +110,6 @@ export function MobileBottomNav({
                                 }`}
                         >
                             <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/') ? "[font-variation-settings:'FILL'_1]" : ""}`}>swords</span>
-                        </Link>
-
-                        <Link
-                            href="/habits"
-                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/habits')
-                                ? 'bg-zinc-100 dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-none'
-                                : 'bg-transparent text-muted-foreground'
-                                }`}
-                        >
-                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/habits') ? "[font-variation-settings:'FILL'_1]" : ""}`}>water_drop</span>
                         </Link>
 
                         {/* Center Quick Add Button */}
@@ -141,13 +131,13 @@ export function MobileBottomNav({
                         </div>
 
                         <Link
-                            href="/weblog"
-                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/weblog')
+                            href="/notes"
+                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/notes')
                                 ? 'bg-zinc-100 dark:bg-zinc-800 text-amber-600 dark:text-amber-400 shadow-none'
                                 : 'bg-transparent text-muted-foreground'
                                 }`}
                         >
-                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/weblog') ? "[font-variation-settings:'FILL'_1]" : ""}`}>menu_book</span>
+                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/notes') ? "[font-variation-settings:'FILL'_1]" : ""}`}>menu_book</span>
                         </Link>
 
                         {/* More Menu Button */}

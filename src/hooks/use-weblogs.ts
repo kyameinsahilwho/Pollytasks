@@ -11,6 +11,8 @@ export type Weblog = {
     userId?: Id<"users"> | string;
     title: string;
     content: string;
+    rawTranscript?: string;
+    audioStorageId?: string;
     emoji?: string;
     color?: string;
     isPinned?: boolean;
@@ -158,9 +160,11 @@ export function useWeblogs(initialWeblogs?: Doc<"weblogs">[]) {
         color?: string;
         isPinned?: boolean;
         tags?: string[];
+        rawTranscript?: string;
+        audioStorageId?: Id<"_storage"> | string;
     }) => {
         if (isAuthenticated) {
-            return await createWeblogMutation(weblogData);
+            return await createWeblogMutation(weblogData as any);
         } else {
             const now = new Date().toISOString();
             const newWeblog: LocalWeblog = {
@@ -174,6 +178,8 @@ export function useWeblogs(initialWeblogs?: Doc<"weblogs">[]) {
                 color: weblogData.color,
                 isPinned: weblogData.isPinned || false,
                 tags: weblogData.tags || [],
+                rawTranscript: weblogData.rawTranscript,
+                audioStorageId: weblogData.audioStorageId,
                 createdAt: now,
                 updatedAt: now,
             };

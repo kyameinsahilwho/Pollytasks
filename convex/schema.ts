@@ -217,11 +217,13 @@ export default defineSchema({
         .index("by_user", ["userId"])
         .index("by_user_and_seen", ["userId", "seen"]),
 
-    // Weblogs for markdown notes
+    // Weblogs for markdown notes and audio notes
     weblogs: defineTable({
         userId: v.id("users"),
-        title: v.string(),
-        content: v.string(),
+        title: v.string(), // Extracted or default title
+        content: v.string(), // Main content (structured text if audio, or raw markdown)
+        rawTranscript: v.optional(v.string()), // For audio notes: raw transcription
+        audioStorageId: v.optional(v.id("_storage")), // Convex storage ID for the audio file
         emoji: v.optional(v.string()),
         color: v.optional(v.string()), // yellow, pink, blue, green
         isPinned: v.optional(v.boolean()),
