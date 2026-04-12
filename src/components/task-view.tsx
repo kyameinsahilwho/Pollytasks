@@ -54,26 +54,29 @@ export function TaskView({
 
   if (activeTab === 'daily') {
     currentDate = addWeeks(today, dateOffset);
-    dateLabel = dateOffset === 0 ? "This Week"
+    dateLabel = dateOffset === 0 ? "Today"
       : dateOffset === -1 ? "Last Week"
       : dateOffset === 1 ? "Next Week"
       : `${Math.abs(dateOffset)} Weeks ${dateOffset < 0 ? 'Ago' : 'Ahead'}`;
   } else if (activeTab === 'weekly') {
+    currentDate = addWeeks(today, dateOffset);
+    const start = startOfWeek(currentDate, { weekStartsOn: 0 });
+    const end = endOfWeek(currentDate, { weekStartsOn: 0 });
+    dateLabel = dateOffset === 0 ? "This Week"
+      : dateOffset === -1 ? "Last Week"
+      : `${format(start, 'MMM d')} – ${format(end, 'MMM d')}`;
+  } else {
     currentDate = addMonths(today, dateOffset);
     dateLabel = dateOffset === 0 ? "This Month"
       : dateOffset === -1 ? "Last Month"
       : format(currentDate, 'MMMM yyyy');
-  } else {
-    currentDate = addMonths(today, dateOffset * 6);
-    dateLabel = dateOffset === 0 ? "Last 6 Months"
-      : (() => { const s = subMonths(currentDate, 5); return `${format(s, 'MMM yyyy')} – ${format(currentDate, 'MMM yyyy')}`; })();
   }
 
   // ── Tasks filtered by tab ─────────────────────────────────────────────────
   const activeTasks = tasks.filter(t => !t.isCompleted);
 
-  const { tabTasks, tabLabel } = useMemo(() => {
-    const todayStart = startOfDay(today);
+  const { tabTasks, tabLabel, todayStart } = useMemo(() => {
+    const ts = startOfDay(today);
 
     if (activeTab === 'daily') {
       const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
@@ -84,15 +87,15 @@ export function TaskView({
         const due = activeTasks.filter(t => {
           if (!t.dueDate) return false;
           const d = startOfDay(parseISO(t.dueDate));
-          return isSameDay(d, todayStart) || isBefore(d, todayStart);
+          return isSameDay(d, ts) || isBefore(d, ts);
         });
         // Also show upcoming this week
         const upcoming = activeTasks.filter(t => {
           if (!t.dueDate) return false;
           const d = startOfDay(parseISO(t.dueDate));
-          return !isSameDay(d, todayStart) && !isBefore(d, todayStart) && d <= weekEnd;
+          return !isSameDay(d, ts) && !isBefore(d, ts) && d <= weekEnd;
         });
-        return { tabTasks: { due, upcoming }, tabLabel: "Today's Quests" };
+        return { tabTasks: { due, upcoming }, tabLabel: "Today's Quests", todayStart: ts };
       } else {
         // Past/future week: incomplete tasks due in that week only
         const week = activeTasks.filter(t => {
@@ -100,28 +103,28 @@ export function TaskView({
           const d = startOfDay(parseISO(t.dueDate));
           return d >= weekStart && d <= weekEnd;
         });
-        return { tabTasks: { due: week, upcoming: [] }, tabLabel: dateLabel + " Quests" };
+        return { tabTasks: { due: week, upcoming: [] }, tabLabel: dateLabel + " Quests", todayStart: ts };
       }
     }
 
     if (activeTab === 'weekly') {
-      // Incomplete tasks due this month only
+      // Incomplete tasks due in the selected week
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+      const weekEnd   = endOfWeek(currentDate,   { weekStartsOn: 0 });
       const due = activeTasks.filter(t => {
         if (!t.dueDate) return false;
-        return isSameMonth(parseISO(t.dueDate), currentDate);
+        const d = startOfDay(parseISO(t.dueDate));
+        return d >= weekStart && d <= weekEnd;
       });
-      return { tabTasks: { due, upcoming: [] }, tabLabel: format(currentDate, 'MMMM') + ' Quests' };
+      return { tabTasks: { due, upcoming: [] }, tabLabel: dateLabel + ' Quests', todayStart: ts };
     }
 
-    // Monthly — last 6 months window, incomplete only
-    const sixAgo = subMonths(currentDate, 5);
-    const windowStart = startOfDay(new Date(sixAgo.getFullYear(), sixAgo.getMonth(), 1));
+    // Monthly — incomplete tasks due in the selected month
     const due = activeTasks.filter(t => {
       if (!t.dueDate) return false;
-      const d = parseISO(t.dueDate);
-      return d >= windowStart && d <= currentDate;
+      return isSameMonth(parseISO(t.dueDate), currentDate);
     });
-    return { tabTasks: { due, upcoming: [] }, tabLabel: 'Recent Quests' };
+    return { tabTasks: { due, upcoming: [] }, tabLabel: format(currentDate, 'MMMM') + ' Quests', todayStart: ts };
   }, [activeTab, dateOffset, activeTasks, tasks, currentDate]);
 
   // ── Habits filtered by tab + sorted: needs-action first ──────────────────
@@ -140,18 +143,16 @@ export function TaskView({
       filtered = activeHabits.filter(h => h.frequency === 'monthly');
     }
 
-    // 2. Determine "needs action" per frequency type
+    // 2. Determine if a ritual needs action (Add button visible)
     const needsAction = (h: typeof activeHabits[0]): boolean => {
       if (h.frequency === 'weekly') {
-        // Needs action if no completion this week
         return !h.completions.some(c =>
-          isSameWeek(parseISO(c.completedAt), new Date(), { weekStartsOn: 0 })
+          isSameWeek(parseISO(c.completedAt), today, { weekStartsOn: 0 })
         );
       }
       if (h.frequency === 'monthly') {
-        // Needs action if no completion this month
         return !h.completions.some(c =>
-          isSameMonth(parseISO(c.completedAt), new Date())
+          isSameMonth(parseISO(c.completedAt), today)
         );
       }
       // Daily-type: due today and not yet done
@@ -161,9 +162,15 @@ export function TaskView({
       );
     };
 
-    // 3. Sort: needs-action (0) before done/not-due (1), stable within each group
-    return [...filtered].sort((a, b) => (needsAction(a) ? 0 : 1) - (needsAction(b) ? 0 : 1));
-  }, [activeHabits, activeTab]);
+    // 3. Sort: rituals with "Add" button first (needsAction is true), stable within groups
+    return [...filtered].sort((a, b) => {
+      const aNeedsAction = needsAction(a);
+      const bNeedsAction = needsAction(b);
+      if (aNeedsAction && !bNeedsAction) return -1;
+      if (!aNeedsAction && bNeedsAction) return 1;
+      return 0;
+    });
+  }, [activeHabits, activeTab, today]);
 
   const hasTasks = (tabTasks as any).due.length > 0 || (tabTasks as any).upcoming?.length > 0;
 
@@ -312,9 +319,47 @@ export function TaskView({
               </div>
             ) : (
               <>
+                {/* ── Rituals section ──────────────────────────────────── */}
+                {showRituals && visibleHabits.length > 0 && (
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between px-1">
+                      <div className="flex items-center gap-2">
+                        <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
+                        <h2 className="text-xs font-black uppercase tracking-[0.15em] text-muted-foreground/70">
+                          Rituals
+                        </h2>
+                      </div>
+                      <span className="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest">
+                        {visibleHabits.filter(h => h.completions.some(c => startOfDay(parseISO(c.completedAt)).getTime() === todayStart.getTime())).length} / {visibleHabits.length} Done
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-0">
+                      <AnimatePresence mode="popLayout">
+                        {visibleHabits.map(habit => (
+                          <HabitItem
+                            key={habit.id}
+                            habit={habit}
+                            currentDate={currentDate}
+                            onToggle={onToggleHabit}
+                            onUpdate={onUpdateHabit}
+                            onDelete={onDeleteHabit}
+                            onViewStats={setSelectedHabitId}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </section>
+                )}
+
                 {/* ── Tasks section ────────────────────────────────────── */}
                 {showTasks && hasTasks && (
                   <section className="space-y-3">
+                    <div className="flex items-center gap-2 px-1">
+                      <ListTodo className="w-4 h-4 text-indigo-400" />
+                      <h2 className="text-xs font-black uppercase tracking-[0.15em] text-muted-foreground/70">
+                        Quests
+                      </h2>
+                    </div>
                     <TaskList
                       tasks={(tabTasks as any).due}
                       listType="active"
@@ -337,33 +382,6 @@ export function TaskView({
                         setCelebrating={setCelebrating}
                       />
                     )}
-                  </section>
-                )}
-
-                {/* ── Rituals section ──────────────────────────────────── */}
-                {showRituals && visibleHabits.length > 0 && (
-                  <section className="space-y-3">
-                    <div className="flex items-center gap-2 px-1">
-                      <Flame className="w-4 h-4 text-orange-400 fill-orange-400" />
-                      <h2 className="text-xs font-black uppercase tracking-[0.15em] text-muted-foreground/70">
-                        Rituals
-                      </h2>
-                    </div>
-                    <div className="flex flex-col gap-0">
-                      <AnimatePresence mode="popLayout">
-                        {visibleHabits.map(habit => (
-                          <HabitItem
-                            key={habit.id}
-                            habit={habit}
-                            currentDate={currentDate}
-                            onToggle={onToggleHabit}
-                            onUpdate={onUpdateHabit}
-                            onDelete={onDeleteHabit}
-                            onViewStats={setSelectedHabitId}
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </div>
                   </section>
                 )}
               </>

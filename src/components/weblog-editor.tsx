@@ -164,8 +164,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                             : htmlContent as string;
                     }
                 } catch (error) {
-                    console.error("Failed to process audio:", error);
-                    alert("Failed to process audio note: " + error);
+                    console.error("Failed to process audio end-to-end:", error);
                 } finally {
                     setIsProcessingAudio(false);
                     // Stop tracks
@@ -238,8 +237,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 setRecordingTime(prev => prev + 1);
             }, 1000);
         } catch (error) {
-            console.error("Error accessing microphone:", error);
-            alert("Could not access microphone.");
+            console.error("Microphone Access Denied or Error:", error);
         }
     };
 
