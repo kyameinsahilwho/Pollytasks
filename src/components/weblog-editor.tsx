@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -79,6 +79,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
     const audioChunksRef = useRef<Blob[]>([]);
     const recorderMimeTypeRef = useRef<string>("audio/webm");
 
+    const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
     const processAudioNote = useAction(api.audio.processAudioNote);
 
     const startRecording = async () => {
@@ -126,22 +127,25 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 const audioBlob = new Blob(audioChunksRef.current, { type: recorderMimeTypeRef.current || "audio/webm" });
                 
                 try {
-                    // 1. Convert audioBlob to base64
-                    const reader = new FileReader();
-                    const base64Promise = new Promise<string>((resolve) => {
-                        reader.onloadend = () => {
-                            const base64String = (reader.result as string).split(',')[1];
-                            resolve(base64String);
-                        };
+                    // 1. Upload audio to Convex storage (handles >1MB better than raw base64 string)
+                    const uploadUrl = await generateUploadUrl();
+                    const result = await fetch(uploadUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": audioBlob.type },
+                        body: audioBlob,
                     });
-                    reader.readAsDataURL(audioBlob);
-                    const audioData = await base64Promise;
 
-                    // 2. Call Gemini action
-                    const aiResponse = await processAudioNote({ 
-                        audioData, 
-                        contentType: audioBlob.type 
-                    });
+                    if (!result.ok) {
+                        throw new Error(`Audio upload failed: ${result.status} ${result.statusText}`);
+                    }
+
+                    const { storageId } = await result.json();
+                    if (!storageId) {
+                        throw new Error("Audio upload did not return a storageId");
+                    }
+
+                    // 2. Call Gemini action with storageId
+                    const aiResponse = await processAudioNote({ storageId });
                     
                     // 3. Update editor
                     if (aiResponse.title) setTitle(aiResponse.title);
@@ -1066,6 +1070,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 <DialogTitle className="sr-only">
                     {weblog ? `Edit Note: ${weblog.title || 'Untitled'}` : 'Create New Note'}
                 </DialogTitle>
+                <DialogDescription className="sr-only">
+                    Editor for creating and editing markdown and audio notes.
+                </DialogDescription>
 
                 {/* Mobile Header */}
                 <div className="flex md:hidden items-center justify-between p-3 border-b-2 border-slate-200/50 bg-white/50 backdrop-blur-sm">
@@ -1529,6 +1536,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
         <Dialog open={isRecordingModalOpen} onOpenChange={(open) => !open && stopRecording()}>
             <DialogContent hideCloseButton className="max-w-sm w-[90vw] p-0 overflow-hidden rounded-3xl border-4 border-indigo-100 shadow-2xl bg-white">
                 <DialogTitle className="sr-only">Recording Audio Note</DialogTitle>
+                <DialogDescription className="sr-only">
+                    Capturing audio for transcription and AI analysis.
+                </DialogDescription>
                 <div className="flex flex-col items-center p-8 gap-6">
                     <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center relative">
                         <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />

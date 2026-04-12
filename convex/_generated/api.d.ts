@@ -16,6 +16,7 @@ import type * as migration from "../migration.js";
 import type * as projects from "../projects.js";
 import type * as reminders from "../reminders.js";
 import type * as social from "../social.js";
+import type * as storage from "../storage.js";
 import type * as tasks from "../tasks.js";
 import type * as users from "../users.js";
 import type * as utils from "../utils.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   reminders: typeof reminders;
   social: typeof social;
+  storage: typeof storage;
   tasks: typeof tasks;
   users: typeof users;
   utils: typeof utils;
