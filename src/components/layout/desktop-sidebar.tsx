@@ -103,6 +103,14 @@ export function DesktopSidebar({
                             isCollapsed={isCollapsed}
                         />
                         <SidebarItem
+                            href="/notes"
+                            isActive={isActive('/notes')}
+                            icon="menu_book"
+                            label="Notes"
+                            color="amber"
+                            isCollapsed={isCollapsed}
+                        />
+                        <SidebarItem
                             href="/projects"
                             isActive={isActive('/projects')}
                             icon="folder_open"
@@ -116,14 +124,6 @@ export function DesktopSidebar({
                             icon="group"
                             label="Squad"
                             color="purple"
-                            isCollapsed={isCollapsed}
-                        />
-                        <SidebarItem
-                            href="/notes"
-                            isActive={isActive('/notes')}
-                            icon="menu_book"
-                            label="Notes"
-                            color="amber"
                             isCollapsed={isCollapsed}
                         />
                         <SidebarItem
