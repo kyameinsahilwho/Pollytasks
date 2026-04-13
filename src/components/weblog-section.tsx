@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, DragEvent } from "react";
-import { Plus, Search, Tag, X, FolderOpen, ChevronLeft, Inbox, GripVertical, FolderInput } from "lucide-react";
+import { Plus, Search, Tag, X, FolderOpen, ChevronLeft, Inbox, GripVertical, FolderInput, Mic, Loader2 } from "lucide-react";
 import { useWeblogs, Weblog } from "@/hooks/use-weblogs";
 import { useWeblogFolders, WeblogFolder } from "@/hooks/use-weblog-folders";
 import { WeblogItem } from "./weblog-item";
@@ -29,6 +29,7 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
     const [isAddFolderOpen, setIsAddFolderOpen] = useState(false);
     const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
     const [showUnfiled, setShowUnfiled] = useState(false);
+    const [isProcessingAudio, setIsProcessingAudio] = useState(false);
 
     // View mode: "folders" (grid of folders) or "folder-content" (inside a folder)
     const isInsideFolder = selectedFolderId !== null;
@@ -299,6 +300,9 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 auto-rows-max">
                                 <AnimatePresence mode="popLayout">
+                                    {isProcessingAudio && !editorOpen && (
+                                        <WeblogAnalyzingItem key="analyzing-note" />
+                                    )}
                                     {(weblogs || []).slice(0, 6).map((weblog) => (
                                         <DraggableWeblogItem
                                             key={weblog._id}
@@ -323,19 +327,77 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
                 />
 
                 <WeblogEditor
-                    isOpen={editorOpen}
-                    onClose={() => setEditorOpen(false)}
-                    weblog={editingWeblog}
-                    onSave={handleSave}
-                    existingTags={allTags}
-                    folders={folders}
-                    initialFolderId={isInsideFolder ? selectedFolderId : null}
-                />
-            </div>
-        );
-    }
+                isOpen={editorOpen}
+                onClose={() => setEditorOpen(false)}
+                weblog={editingWeblog}
+                onSave={handleSave}
+                onProcessingStatusChange={setIsProcessingAudio}
+                existingTags={allTags}
+                folders={folders}
+                initialFolderId={isInsideFolder ? selectedFolderId : null}
+            />
+        </div>
+    );
+}
 
-    // ─── Inside a folder / Unfiled view ───
+function WeblogAnalyzingItem() {
+    return (
+        <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ 
+                opacity: 1, 
+                scale: 1, 
+                y: 0,
+                transition: { 
+                    type: "spring",
+                    stiffness: 300,
+                    damping: 25
+                }
+            }}
+            className="group relative flex flex-col p-4 md:p-5 rounded-2xl border-2 border-b-4 border-indigo-200 bg-indigo-50/50 transition-all shadow-sm min-h-[140px] md:min-h-[160px] overflow-hidden"
+        >
+            {/* Shimmer effect */}
+            <motion.div 
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent -translate-x-full"
+                animate={{
+                    translateX: ["100%", "-100%"],
+                }}
+                transition={{
+                    repeat: Infinity,
+                    duration: 1.5,
+                    ease: "linear",
+                }}
+            />
+            
+            <div className="flex items-start gap-3 mb-4 relative z-10">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm border border-indigo-100 relative">
+                    <div className="absolute inset-0 bg-indigo-400/20 rounded-xl animate-ping" />
+                    <Mic className="w-5 h-5 text-indigo-500 animate-pulse" />
+                </div>
+                <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-indigo-200/50 rounded-md w-3/4 animate-pulse" />
+                    <div className="h-3 bg-indigo-100/50 rounded-md w-1/2 animate-pulse" />
+                </div>
+            </div>
+            
+            <div className="flex-1 space-y-2 relative z-10">
+                <div className="h-3 bg-slate-200/50 rounded-md w-full animate-pulse" />
+                <div className="h-3 bg-slate-200/50 rounded-md w-5/6 animate-pulse" />
+                <div className="h-3 bg-slate-200/50 rounded-md w-4/6 animate-pulse" />
+            </div>
+            
+            <div className="mt-4 flex items-center justify-between relative z-10">
+                <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">AI Analyzing...</span>
+                </div>
+            </div>
+        </motion.div>
+    );
+}
+
+// ─── Inside a folder / Unfiled view ───
     return (
         <div className="flex flex-col h-full gap-4 md:gap-6 pb-24 relative">
             {/* Header with back nav */}
@@ -437,6 +499,9 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
                 </motion.button>
 
                 <AnimatePresence mode="popLayout">
+                    {isProcessingAudio && !editorOpen && (
+                        <WeblogAnalyzingItem key="analyzing-note-folder" />
+                    )}
                     {currentWeblogs.map((weblog) => (
                         <DraggableWeblogItem
                             key={weblog._id}
@@ -483,11 +548,69 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
                 onClose={() => setEditorOpen(false)}
                 weblog={editingWeblog}
                 onSave={handleSave}
+                onProcessingStatusChange={setIsProcessingAudio}
                 existingTags={allTags}
                 folders={folders}
                 initialFolderId={isInsideFolder ? selectedFolderId : null}
             />
         </div>
+    );
+}
+
+function WeblogAnalyzingItem() {
+    return (
+        <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ 
+                opacity: 1, 
+                scale: 1, 
+                y: 0,
+                transition: { 
+                    type: "spring",
+                    stiffness: 300,
+                    damping: 25
+                }
+            }}
+            className="group relative flex flex-col p-4 md:p-5 rounded-2xl border-2 border-b-4 border-indigo-200 bg-indigo-50/50 transition-all shadow-sm min-h-[140px] md:min-h-[160px] overflow-hidden"
+        >
+            {/* Shimmer effect */}
+            <motion.div 
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent -translate-x-full"
+                animate={{
+                    translateX: ["100%", "-100%"],
+                }}
+                transition={{
+                    repeat: Infinity,
+                    duration: 1.5,
+                    ease: "linear",
+                }}
+            />
+            
+            <div className="flex items-start gap-3 mb-4 relative z-10">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm border border-indigo-100 relative">
+                    <div className="absolute inset-0 bg-indigo-400/20 rounded-xl animate-ping" />
+                    <Mic className="w-5 h-5 text-indigo-500 animate-pulse" />
+                </div>
+                <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-indigo-200/50 rounded-md w-3/4 animate-pulse" />
+                    <div className="h-3 bg-indigo-100/50 rounded-md w-1/2 animate-pulse" />
+                </div>
+            </div>
+            
+            <div className="flex-1 space-y-2 relative z-10">
+                <div className="h-3 bg-slate-200/50 rounded-md w-full animate-pulse" />
+                <div className="h-3 bg-slate-200/50 rounded-md w-5/6 animate-pulse" />
+                <div className="h-3 bg-slate-200/50 rounded-md w-4/6 animate-pulse" />
+            </div>
+            
+            <div className="mt-4 flex items-center justify-between relative z-10">
+                <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">AI Analyzing...</span>
+                </div>
+            </div>
+        </motion.div>
     );
 }
 

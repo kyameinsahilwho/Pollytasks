@@ -126,8 +126,6 @@ export function TaskView({
 
   // ── Habits filtered by tab + sorted: needs-action first ──────────────────
   const visibleHabits = useMemo(() => {
-    const todayStart = startOfDay(new Date());
-
     // 1. Filter by tab
     let filtered: typeof activeHabits;
     if (activeTab === 'daily') {
@@ -140,29 +138,20 @@ export function TaskView({
       filtered = activeHabits.filter(h => h.frequency === 'monthly');
     }
 
-    // 2. Determine "needs action" per frequency type
-    const needsAction = (h: typeof activeHabits[0]): boolean => {
-      if (h.frequency === 'weekly') {
-        // Needs action if no completion this week
-        return !h.completions.some(c =>
-          isSameWeek(parseISO(c.completedAt), new Date(), { weekStartsOn: 0 })
-        );
-      }
-      if (h.frequency === 'monthly') {
-        // Needs action if no completion this month
-        return !h.completions.some(c =>
-          isSameMonth(parseISO(c.completedAt), new Date())
-        );
-      }
-      // Daily-type: due today and not yet done
-      if (!isHabitDueToday(h)) return false;
-      return !h.completions.some(
-        c => startOfDay(parseISO(c.completedAt)).getTime() === todayStart.getTime()
-      );
+    // 2. Determine if habit is scheduled for current view/period
+    const isScheduled = (h: typeof activeHabits[0]): boolean => {
+      if (activeTab === 'weekly') return h.frequency === 'weekly';
+      if (activeTab === 'monthly') return h.frequency === 'monthly';
+      return isHabitDueToday(h);
     };
 
-    // 3. Sort: needs-action (0) before done/not-due (1), stable within each group
-    return [...filtered].sort((a, b) => (needsAction(a) ? 0 : 1) - (needsAction(b) ? 0 : 1));
+    // 3. Sort: scheduled (0) before not-scheduled (1), stable by createdAt within each group
+    return [...filtered].sort((a, b) => {
+      const aSched = isScheduled(a);
+      const bSched = isScheduled(b);
+      if (aSched !== bSched) return aSched ? -1 : 1;
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
   }, [activeHabits, activeTab]);
 
   const hasTasks = (tabTasks as any).due.length > 0 || (tabTasks as any).upcoming?.length > 0;

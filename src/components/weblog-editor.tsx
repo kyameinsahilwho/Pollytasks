@@ -33,7 +33,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Mic, Square, Loader2, Eye, EyeOff } from "lucide-react";
+import { Mic, Square, Loader2, Eye, EyeOff, Pause, Play } from "lucide-react";
 import { marked } from "marked";
 
 // Default color for weblog icons
@@ -45,12 +45,13 @@ interface WeblogEditorProps {
     onClose: () => void;
     weblog?: Weblog | null;
     onSave: (data: any) => Promise<void>;
+    onProcessingStatusChange?: (isProcessing: boolean) => void;
     existingTags?: string[];
     folders: WeblogFolder[];
     initialFolderId?: string | null;
 }
 
-export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [], folders = [], initialFolderId = null }: WeblogEditorProps) {
+export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStatusChange, existingTags = [], folders = [], initialFolderId = null }: WeblogEditorProps) {
     const [title, setTitle] = useState("");
     const [emoji, setEmoji] = useState("📝");
     const [folderId, setFolderId] = useState<string | null>(null);
@@ -64,10 +65,39 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
     
     // Audio feature states
     const [isRecording, setIsRecording] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
+    const isPausedRef = useRef(false);
     const [isProcessingAudio, setIsProcessingAudio] = useState(false);
     const [rawTranscript, setRawTranscript] = useState<string | undefined>(undefined);
     const [showRawTranscript, setShowRawTranscript] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
+    
+    // State refs for background saving
+    const titleRef = useRef(title);
+    const emojiRef = useRef(emoji);
+    const folderIdRef = useRef(folderId);
+    const tagsRef = useRef(tags);
+    const rawTranscriptRef = useRef(rawTranscript);
+    const isProcessingAudioRef = useRef(false);
+    const isMountedRef = useRef(false);
+    const shouldSaveOnCompleteRef = useRef(false);
+
+    useEffect(() => {
+        titleRef.current = title;
+    }, [title]);
+    useEffect(() => {
+        emojiRef.current = emoji;
+    }, [emoji]);
+    useEffect(() => {
+        folderIdRef.current = folderId;
+    }, [folderId]);
+    useEffect(() => {
+        tagsRef.current = tags;
+    }, [tags]);
+    useEffect(() => {
+        rawTranscriptRef.current = rawTranscript;
+    }, [rawTranscript]);
+    
     const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
@@ -81,6 +111,12 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
     const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
     const processAudioNote = useAction(api.audio.processAudioNote);
+
+    useEffect(() => {
+        if (isProcessingAudio !== undefined) {
+            onProcessingStatusChange?.(isProcessingAudio);
+        }
+    }, [isProcessingAudio, onProcessingStatusChange]);
 
     const startRecording = async () => {
         try {
@@ -111,6 +147,8 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
             mediaRecorder.onstop = async () => {
                 setIsProcessingAudio(true);
+                isProcessingAudioRef.current = true;
+                
                 // Reset recording timer and animations
                 if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
                 if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -122,10 +160,19 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 analyserRef.current = null;
                 animationFrameRef.current = null;
                 
-                setRecordingTime(0);
+                if (isMountedRef.current) setRecordingTime(0);
 
                 const audioBlob = new Blob(audioChunksRef.current, { type: recorderMimeTypeRef.current || "audio/webm" });
                 
+                // Capture current editor state to ensure we can save even if component unmounts
+                const currentEditorContent = editorRef.current?.innerHTML || "";
+                const currentTitle = titleRef.current;
+                const currentEmoji = emojiRef.current;
+                const currentFolderId = folderIdRef.current;
+                const currentTags = tagsRef.current;
+                const currentWeblogId = weblog?._id;
+                const currentIsPinned = weblog?.isPinned;
+
                 try {
                     // 1. Upload audio to Convex storage (handles >1MB better than raw base64 string)
                     const uploadUrl = await generateUploadUrl();
@@ -147,26 +194,53 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                     // 2. Call Gemini action with storageId
                     const aiResponse = await processAudioNote({ storageId });
                     
-                    // 3. Update editor
-                    if (aiResponse.title) setTitle(aiResponse.title);
-                    if (aiResponse.emoji) setEmoji(aiResponse.emoji);
-                    if (aiResponse.rawTranscript) setRawTranscript(aiResponse.rawTranscript);
+                    // Construct final note data
+                    const finalTitle = aiResponse.title || currentTitle || "Untitled Note";
+                    const finalEmoji = aiResponse.emoji || currentEmoji || "📝";
+                    const finalRawTranscript = aiResponse.rawTranscript || "";
                     
-                    // Append structured content
-                    if (editorRef.current && aiResponse.structuredContent) {
+                    let finalContent = currentEditorContent;
+                    if (aiResponse.structuredContent) {
                         const htmlContent = marked.parse(aiResponse.structuredContent, { 
                             gfm: true, 
                             breaks: true 
                         });
-                        const currentContent = editorRef.current.innerHTML;
-                        editorRef.current.innerHTML = currentContent 
-                            ? currentContent + '<br><br>' + htmlContent
+                        finalContent = finalContent 
+                            ? finalContent + '<br><br>' + htmlContent
                             : htmlContent as string;
+                    }
+
+                    // 3. Auto-save in background if requested or if component is unmounting
+                    if (shouldSaveOnCompleteRef.current || !isMountedRef.current) {
+                        console.log("Saving audio note in background...");
+                        await onSave({
+                            id: currentWeblogId,
+                            title: finalTitle,
+                            content: finalContent,
+                            emoji: finalEmoji,
+                            folderId: currentFolderId || undefined,
+                            tags: currentTags,
+                            isPinned: currentIsPinned,
+                            rawTranscript: finalRawTranscript
+                        });
+                        
+                        // Clear draft since we've successfully saved in background
+                        localStorage.removeItem(draftKey);
+                    } else if (isMountedRef.current) {
+                        // 4. Update editor UI if still mounted
+                        if (aiResponse.title) setTitle(aiResponse.title);
+                        if (aiResponse.emoji) setEmoji(aiResponse.emoji);
+                        if (aiResponse.rawTranscript) setRawTranscript(aiResponse.rawTranscript);
+                        
+                        if (editorRef.current) {
+                            editorRef.current.innerHTML = finalContent;
+                        }
                     }
                 } catch (error) {
                     console.error("Failed to process audio end-to-end:", error);
                 } finally {
-                    setIsProcessingAudio(false);
+                    if (isMountedRef.current) setIsProcessingAudio(false);
+                    isProcessingAudioRef.current = false;
                     // Stop tracks
                     stream.getTracks().forEach(track => track.stop());
                 }
@@ -174,6 +248,8 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
             mediaRecorder.start();
             setIsRecording(true);
+            setIsPaused(false);
+            isPausedRef.current = false;
             setIsRecordingModalOpen(true);
             setRecordingTime(0);
             
@@ -195,7 +271,14 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 const ctx = canvas.getContext('2d');
                 if (!ctx) return;
 
-                analyserRef.current.getByteFrequencyData(dataArray);
+                if (!isPausedRef.current) {
+                    analyserRef.current.getByteFrequencyData(dataArray);
+                } else {
+                    // Smooth decay when paused
+                    for (let i = 0; i < dataArray.length; i++) {
+                        dataArray[i] = Math.max(0, dataArray[i] * 0.85);
+                    }
+                }
                 
                 const width = canvas.width;
                 const height = canvas.height;
@@ -234,7 +317,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
             }, 100);
 
             recordingTimerRef.current = setInterval(() => {
-                setRecordingTime(prev => prev + 1);
+                if (!isPausedRef.current) {
+                    setRecordingTime(prev => prev + 1);
+                }
             }, 1000);
         } catch (error) {
             console.error("Microphone Access Denied or Error:", error);
@@ -242,11 +327,29 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
     };
 
     const stopRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
+        if (mediaRecorderRef.current && (isRecording || isPaused)) {
             mediaRecorderRef.current.stop();
             setIsRecording(false);
+            setIsPaused(false);
+            isPausedRef.current = false;
             setIsRecordingModalOpen(false);
             // Most cleanup happens in onstop to avoid double-closing AudioContext
+        }
+    };
+
+    const pauseRecording = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+            mediaRecorderRef.current.pause();
+            setIsPaused(true);
+            isPausedRef.current = true;
+        }
+    };
+
+    const resumeRecording = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+            mediaRecorderRef.current.resume();
+            setIsPaused(false);
+            isPausedRef.current = false;
         }
     };
 
@@ -286,7 +389,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
     // Cleanup recording resources on unmount
     useEffect(() => {
+        isMountedRef.current = true;
         return () => {
+            isMountedRef.current = false;
             if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
             if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
@@ -451,6 +556,11 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
     // Handle close with warning
     const handleClose = useCallback(() => {
+        if (isProcessingAudioRef.current) {
+            shouldSaveOnCompleteRef.current = true;
+            onClose();
+            return;
+        }
         if (hasUnsavedChanges()) {
             saveDraft(); // Save before showing warning
             setShowCloseWarning(true);
@@ -462,6 +572,12 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
 
     // Discard draft and close
     const handleDiscardAndClose = useCallback(() => {
+        if (isProcessingAudioRef.current) {
+            shouldSaveOnCompleteRef.current = true;
+            setShowCloseWarning(false);
+            onClose();
+            return;
+        }
         clearDraft();
         setShowCloseWarning(false);
         onClose();
@@ -1538,17 +1654,26 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                     Capturing audio for transcription and AI analysis.
                 </DialogDescription>
                 <div className="flex flex-col items-center p-8 gap-6">
-                    <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center relative">
-                        <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />
-                        <Mic className="w-10 h-10 text-red-500 relative z-10" />
+                    <div className={cn(
+                        "w-20 h-20 rounded-full flex items-center justify-center relative transition-all duration-300",
+                        isPaused ? "bg-slate-100 scale-95" : "bg-red-50 scale-100"
+                    )}>
+                        {!isPaused && <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />}
+                        <Mic className={cn(
+                            "w-10 h-10 relative z-10 transition-colors duration-300",
+                            isPaused ? "text-slate-400" : "text-red-500"
+                        )} />
                     </div>
 
                     <div className="flex flex-col items-center gap-1">
                         <span className="text-2xl font-black text-slate-800 tabular-nums">
                             {formatTime(recordingTime)}
                         </span>
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">
-                            Recording...
+                        <span className={cn(
+                            "text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300",
+                            isPaused ? "text-amber-500" : "text-red-500 animate-pulse"
+                        )}>
+                            {isPaused ? "Paused" : "Recording..."}
                         </span>
                     </div>
 
@@ -1561,13 +1686,27 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                         />
                     </div>
 
-                    <Button
-                        onClick={stopRecording}
-                        className="w-full h-14 bg-red-500 hover:bg-red-600 text-white font-black text-lg rounded-2xl border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-3"
-                    >
-                        <Square className="w-6 h-6 fill-current" />
-                        Stop Recording
-                    </Button>
+                    <div className="flex gap-3 w-full">
+                        <Button
+                            onClick={isPaused ? resumeRecording : pauseRecording}
+                            className={cn(
+                                "flex-1 h-14 font-black text-base rounded-2xl border-b-4 transition-all flex items-center justify-center gap-2",
+                                isPaused 
+                                    ? "bg-indigo-500 hover:bg-indigo-600 text-white border-indigo-700 active:border-b-0 active:translate-y-1" 
+                                    : "bg-amber-400 hover:bg-amber-500 text-slate-900 border-amber-600 active:border-b-0 active:translate-y-1"
+                            )}
+                        >
+                            {isPaused ? <Play className="w-5 h-5 fill-current" /> : <Pause className="w-5 h-5 fill-current" />}
+                            {isPaused ? "Resume" : "Pause"}
+                        </Button>
+                        <Button
+                            onClick={stopRecording}
+                            className="flex-1 h-14 bg-red-500 hover:bg-red-600 text-white font-black text-base rounded-2xl border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-2"
+                        >
+                            <Square className="w-5 h-5 fill-current" />
+                            Stop
+                        </Button>
+                    </div>
                 </div>
             </DialogContent>
         </Dialog>
@@ -1578,22 +1717,36 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, existingTags = [
                 <AlertDialogHeader>
                     <AlertDialogTitle className="font-black">Unsaved Changes</AlertDialogTitle>
                     <AlertDialogDescription>
-                        You have unsaved changes. Your draft has been saved and will be restored when you reopen the editor. Do you want to keep the draft or discard it?
+                        {isProcessingAudio ? 
+                            "Your audio note is currently being analyzed by AI. You can close this editor and the note will be automatically saved in the background once processing is complete." :
+                            "You have unsaved changes. Your draft has been saved and will be restored when you reopen the editor. Do you want to keep the draft or discard it?"
+                        }
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter className="gap-2">
-                    <AlertDialogCancel 
-                        onClick={handleDiscardAndClose}
-                        className="rounded-xl font-bold border-2 text-red-500 border-red-200 hover:bg-red-50"
-                    >
-                        Discard Draft
-                    </AlertDialogCancel>
-                    <AlertDialogAction 
-                        onClick={handleKeepDraftAndClose}
-                        className="rounded-xl font-bold bg-green-500 hover:bg-green-600 text-white"
-                    >
-                        Keep Draft
-                    </AlertDialogAction>
+                    {isProcessingAudio ? (
+                        <AlertDialogAction 
+                            onClick={handleDiscardAndClose}
+                            className="rounded-xl font-bold bg-indigo-500 hover:bg-indigo-600 text-white"
+                        >
+                            Save in Background & Close
+                        </AlertDialogAction>
+                    ) : (
+                        <>
+                            <AlertDialogCancel 
+                                onClick={handleDiscardAndClose}
+                                className="rounded-xl font-bold border-2 text-red-500 border-red-200 hover:bg-red-50"
+                            >
+                                Discard Draft
+                            </AlertDialogCancel>
+                            <AlertDialogAction 
+                                onClick={handleKeepDraftAndClose}
+                                className="rounded-xl font-bold bg-green-500 hover:bg-green-600 text-white"
+                            >
+                                Keep Draft
+                            </AlertDialogAction>
+                        </>
+                    )}
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
