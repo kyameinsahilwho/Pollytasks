@@ -342,6 +342,13 @@ export const getFriends = query({
                     )
                     .first();
 
+                // Most recent activity snapshot for "last active" UI
+                const latestActivity = await ctx.db
+                    .query("activitySnapshots")
+                    .withIndex("by_user", (q) => q.eq("userId", friendship.friendId))
+                    .order("desc")
+                    .first();
+
                 return {
                     friendshipId: friendship._id,
                     id: friend._id,
@@ -351,6 +358,7 @@ export const getFriends = query({
                     totalXP: friend.totalXP || 0,
                     currentStreak: friend.currentStreak || 0,
                     since: friendship.createdAt,
+                    lastActiveAt: latestActivity ? `${latestActivity.date}T00:00:00.000Z` : null,
                     todayActivity: todayActivity ? {
                         tasksCompleted: todayActivity.tasksCompleted,
                         habitsCompleted: todayActivity.habitsCompleted,

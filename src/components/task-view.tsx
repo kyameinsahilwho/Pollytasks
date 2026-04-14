@@ -14,6 +14,7 @@ import { RitualStats } from "./ritual-stats";
 import { AddHabitDialog } from "./add-habit-dialog";
 import { ChevronLeft, ChevronRight, Target, Flame, LayoutGrid, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface TaskViewProps {
   habits: Habit[];
@@ -172,8 +173,41 @@ export function TaskView({
       {/* ── Sticky header: compact view/type/date controls ────────────────── */}
       <div className="sticky top-0 z-30 pt-3 pb-4">
         <div className="flex flex-wrap items-center gap-2 w-full bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-2xl p-2">
-          <div className="flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
-            <span className="px-2 text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">View</span>
+          <div className="flex items-center gap-2 w-full sm:hidden">
+            <Select
+              value={activeTab}
+              onValueChange={(value: Tab) => {
+                setDirection(0);
+                setActiveTab(value);
+                setDateOffset(0);
+              }}
+            >
+              <SelectTrigger className="h-9 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[11px] font-black uppercase tracking-widest text-[#1E293B]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="daily">Week</SelectItem>
+                <SelectItem value="weekly">Month</SelectItem>
+                <SelectItem value="monthly">6 Months</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={showFilter}
+              onValueChange={(value: 'both' | 'tasks' | 'rituals') => setShowFilter(value)}
+            >
+              <SelectTrigger className="h-9 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[11px] font-black uppercase tracking-widest text-[#1E293B]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="both">All</SelectItem>
+                <SelectItem value="tasks">Tasks</SelectItem>
+                <SelectItem value="rituals">Habits</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="hidden sm:flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
             <div className="relative flex items-center bg-[#F1F4F9] p-0.5 rounded-full border border-[#E2E8F0] gap-0.5 flex-1 sm:flex-none min-w-0">
               {([
                 { key: 'daily', label: 'Week' },
@@ -202,8 +236,7 @@ export function TaskView({
             </div>
           </div>
 
-          <div className="flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
-            <span className="px-2 text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">Type</span>
+          <div className="hidden sm:flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
             <div className="flex items-center bg-[#F1F4F9] border border-[#E2E8F0] rounded-full p-0.5 gap-0.5 flex-1 sm:flex-none min-w-0">
               {([
                 { key: 'both',    label: 'All',    Icon: LayoutGrid },

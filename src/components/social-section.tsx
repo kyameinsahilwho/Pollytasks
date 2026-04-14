@@ -300,6 +300,21 @@ function FriendCard({ friend, onSendCheer, onRemoveFriend }: {
 }) {
     const [showCheerPicker, setShowCheerPicker] = useState(false);
     const [showConfirmUnfriend, setShowConfirmUnfriend] = useState(false);
+    const getLastActiveText = (lastActiveAt?: string | null) => {
+        if (!lastActiveAt) return "Last active: no activity yet";
+
+        const activeDate = new Date(lastActiveAt);
+        if (Number.isNaN(activeDate.getTime())) return "Last active: unknown";
+
+        const diffMs = Date.now() - activeDate.getTime();
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffDays <= 0) return "Last active: today";
+        if (diffDays === 1) return "Last active: yesterday";
+        if (diffDays < 7) return `Last active: ${diffDays} days ago`;
+
+        return `Last active: ${activeDate.toLocaleDateString()}`;
+    };
 
     return (
         <motion.div
@@ -333,6 +348,9 @@ function FriendCard({ friend, onSendCheer, onRemoveFriend }: {
                     <span className="text-muted-foreground/30">•</span>
                     <span>{friend.totalXP?.toLocaleString() || 0} XP</span>
                 </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                    {getLastActiveText(friend.lastActiveAt)}
+                </p>
                 {friend.todayActivity && (
                     <div className="flex flex-col gap-1 mt-1.5">
                         <div className="flex items-center gap-2 text-[10px] font-black text-green-600 uppercase tracking-wide">
