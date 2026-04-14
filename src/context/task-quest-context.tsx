@@ -4,10 +4,12 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback, u
 import { useToast } from "@/hooks/use-toast";
 import { useTasks } from '@/hooks/use-tasks';
 import { useHabits } from '@/hooks/use-habits';
+import { useWeblogs } from '@/hooks/use-weblogs';
 import { useReminders } from '@/hooks/use-reminders';
 import { useNotifications } from '@/hooks/use-notifications';
 import { User, Task, Reminder, Project, Habit, Streaks } from '@/lib/types';
-import { calculateLevel, XP_PER_TASK } from '@/lib/level-system';
+import { calculateLevel, XP_PER_NOTE, XP_PER_TASK } from '@/lib/level-system';
+import { differenceInCalendarDays, isToday, isYesterday, parseISO, startOfDay } from 'date-fns';
 
 import { useConvexAuth, useQuery, useMutation } from "convex/react";
 import { useClerk, useUser } from "@clerk/nextjs";
@@ -143,7 +145,6 @@ export function TaskQuestProvider({ children, initialData }: { children: React.R
     tasks,
     projects,
     stats,
-    streaks,
     addTask,
     deleteTask,
     toggleTaskCompletion,
@@ -173,6 +174,8 @@ export function TaskQuestProvider({ children, initialData }: { children: React.R
     triggerReminder,
   } = useReminders(initialData?.reminders);
 
+  const { weblogs } = useWeblogs();
+
   const {
     permission,
     isSupported,
@@ -201,8 +204,80 @@ export function TaskQuestProvider({ children, initialData }: { children: React.R
       return acc + (habit.xp || 0);
     }, 0);
 
-    return calculateLevel(taskXP + habitXP);
-  }, [tasks, habits]);
+    const noteXP = weblogs.length * XP_PER_NOTE;
+
+    return calculateLevel(taskXP + habitXP + noteXP);
+  }, [tasks, habits, weblogs]);
+
+  const streaks = useMemo<Streaks>(() => {
+    const toStartOfDay = (value?: string) => {
+      if (!value) return null;
+      const parsedDate = parseISO(value);
+      if (Number.isNaN(parsedDate.getTime())) return null;
+      return startOfDay(parsedDate);
+    };
+
+    const taskCompletionDates = tasks
+      .filter((task) => task.completedAt)
+      .map((task) => toStartOfDay(task.completedAt || undefined))
+      .filter((date): date is Date => date !== null);
+
+    const weblogActivityDates = weblogs.flatMap((weblog) => {
+      const activityDates: Date[] = [];
+      const createdDate = toStartOfDay(weblog.createdAt);
+      const updatedDate = toStartOfDay(weblog.updatedAt);
+      if (createdDate) activityDates.push(createdDate);
+      if (updatedDate) activityDates.push(updatedDate);
+      return activityDates;
+    });
+
+    const uniqueDates = Array.from(
+      new Set(
+        [...taskCompletionDates, ...weblogActivityDates].map((date) => date.getTime())
+      )
+    )
+      .map((time) => new Date(time))
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    if (uniqueDates.length === 0) return { current: 0, longest: 0 };
+
+    let longest = 1;
+    let currentRun = 1;
+
+    for (let i = 1; i < uniqueDates.length; i++) {
+      const daysDiff = differenceInCalendarDays(uniqueDates[i], uniqueDates[i - 1]);
+      if (daysDiff === 1) {
+        currentRun++;
+        continue;
+      }
+
+      if (daysDiff > 1) {
+        longest = Math.max(longest, currentRun);
+        currentRun = 1;
+      }
+    }
+
+    longest = Math.max(longest, currentRun);
+
+    let current = 0;
+    const lastActiveDate = uniqueDates[uniqueDates.length - 1];
+
+    if (isToday(lastActiveDate) || isYesterday(lastActiveDate)) {
+      current = 1;
+      for (let i = uniqueDates.length - 2; i >= 0; i--) {
+        const daysDiff = differenceInCalendarDays(uniqueDates[i + 1], uniqueDates[i]);
+        if (daysDiff === 1) {
+          current++;
+          continue;
+        }
+        if (daysDiff > 1) {
+          break;
+        }
+      }
+    }
+
+    return { current, longest };
+  }, [tasks, weblogs]);
 
   // Sync user settings to Convex
   useEffect(() => {

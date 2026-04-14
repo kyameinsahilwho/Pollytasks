@@ -7,7 +7,7 @@ import TaskList from "./task-list";
 import { isHabitDueToday } from "@/lib/utils";
 import {
   isBefore, isSameDay, startOfDay, parseISO, format, addWeeks, addMonths,
-  isSameWeek, isSameMonth, startOfWeek, endOfWeek, subMonths,
+  isSameWeek, isSameMonth, startOfWeek, endOfWeek, subMonths, startOfMonth, endOfMonth,
 } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { RitualStats } from "./ritual-stats";
@@ -115,11 +115,12 @@ export function TaskView({
 
     // Monthly — last 6 months window, incomplete only
     const sixAgo = subMonths(currentDate, 5);
-    const windowStart = startOfDay(new Date(sixAgo.getFullYear(), sixAgo.getMonth(), 1));
+    const windowStart = startOfMonth(sixAgo);
+    const windowEnd = endOfMonth(currentDate);
     const due = activeTasks.filter(t => {
       if (!t.dueDate) return false;
       const d = parseISO(t.dueDate);
-      return d >= windowStart && d <= currentDate;
+      return d >= windowStart && d <= windowEnd;
     });
     return { tabTasks: { due, upcoming: [] }, tabLabel: 'Recent Quests' };
   }, [activeTab, dateOffset, activeTasks, tasks, currentDate]);
@@ -168,100 +169,99 @@ export function TaskView({
       {!selectedHabit && (
     <div className="flex flex-col gap-0 w-full max-w-5xl mx-auto pb-32">
 
-      {/* ── Sticky header: tabs + date nav ────────────────────────────────── */}
+      {/* ── Sticky header: compact view/type/date controls ────────────────── */}
       <div className="sticky top-0 z-30 pt-3 pb-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full">
-
-          {/* Row 1: Tab switcher + date nav */}
-          <div className="flex items-center justify-between w-full gap-2">
-            {/* Tab pills */}
-            <div className="flex items-center gap-1.5 bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full px-2 py-1.5">
-              <div className="relative flex items-center bg-[#F1F4F9] p-0.5 rounded-full border border-[#E2E8F0] gap-0.5">
-                {(['daily', 'weekly', 'monthly'] as const).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => { setDirection(0); setActiveTab(tab); setDateOffset(0); }}
-                    className={cn(
-                      "relative px-3 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 cursor-pointer z-10",
-                      activeTab === tab ? "text-[#1E293B]" : "text-[#94A3B8] hover:text-[#64748B]"
-                    )}
-                  >
-                    {activeTab === tab && (
-                      <motion.div
-                        layoutId="combined-tab-pill"
-                        className="absolute inset-0 bg-white rounded-full shadow-sm border border-[#E2E8F0]"
-                        style={{ zIndex: -1 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                      />
-                    )}
-                    {tab}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Date navigator */}
-            <div className="flex items-center gap-1 bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full px-2 py-1.5">
-              <button
-                onClick={() => { setDirection(-1); setDateOffset(p => p - 1); }}
-                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#F1F4F9] transition-all active:scale-90"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 text-[#64748B]" />
-              </button>
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.span
-                  key={`${activeTab}-${dateOffset}`}
-                  initial={{ opacity: 0, y: direction > 0 ? -6 : 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: direction > 0 ? 6 : -6 }}
-                  transition={{ duration: 0.15, ease: "easeOut" }}
-                  className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#1E293B] min-w-[80px] sm:min-w-[100px] text-center"
+        <div className="flex flex-wrap items-center gap-2 w-full bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-2xl p-2">
+          <div className="flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
+            <span className="px-2 text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">View</span>
+            <div className="relative flex items-center bg-[#F1F4F9] p-0.5 rounded-full border border-[#E2E8F0] gap-0.5 flex-1 sm:flex-none min-w-0">
+              {([
+                { key: 'daily', label: 'Week' },
+                { key: 'weekly', label: 'Month' },
+                { key: 'monthly', label: '6 Months' },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => { setDirection(0); setActiveTab(key); setDateOffset(0); }}
+                  className={cn(
+                    "relative flex-1 sm:flex-none px-3 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 cursor-pointer z-10 whitespace-nowrap",
+                    activeTab === key ? "text-[#1E293B]" : "text-[#94A3B8] hover:text-[#64748B]"
+                  )}
                 >
-                  {dateLabel}
-                </motion.span>
-              </AnimatePresence>
-              <button
-                onClick={() => { setDirection(1); setDateOffset(p => p + 1); }}
-                disabled={dateOffset >= 0}
-                className={cn(
-                  "w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90",
-                  dateOffset >= 0 ? "opacity-25 cursor-not-allowed" : "hover:bg-[#F1F4F9]"
-                )}
-              >
-                <ChevronRight className="w-3.5 h-3.5 text-[#64748B]" />
-              </button>
+                  {activeTab === key && (
+                    <motion.div
+                      layoutId="combined-tab-pill"
+                      className="absolute inset-0 bg-white rounded-full shadow-sm border border-[#E2E8F0]"
+                      style={{ zIndex: -1 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Row 2: View filter (icon + label, responsive) */}
-          <div className="flex items-center w-full">
-            <div className="flex items-center bg-white/80 backdrop-blur-xl border border-[#E2E8F0] shadow-sm rounded-full p-1 gap-0.5 w-full">
+          <div className="flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0">
+            <span className="px-2 text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">Type</span>
+            <div className="flex items-center bg-[#F1F4F9] border border-[#E2E8F0] rounded-full p-0.5 gap-0.5 flex-1 sm:flex-none min-w-0">
               {([
-                { key: 'both',    label: 'Both',    Icon: LayoutGrid },
+                { key: 'both',    label: 'All',    Icon: LayoutGrid },
                 { key: 'tasks',   label: 'Tasks',   Icon: ListTodo },
-                { key: 'rituals', label: 'Rituals', Icon: Flame },
+                { key: 'rituals', label: 'Habits', Icon: Flame },
               ] as const).map(({ key, label, Icon }) => (
                 <button
                   key={key}
                   onClick={() => setShowFilter(key)}
                   className={cn(
-                    "relative flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 z-10",
+                    "relative flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-200 z-10 whitespace-nowrap",
                     showFilter === key ? "text-[#1E293B]" : "text-[#94A3B8] hover:text-[#64748B]"
                   )}
                 >
                   {showFilter === key && (
                     <motion.div
                       layoutId="filter-pill"
-                      className="absolute inset-0 bg-[#F1F4F9] rounded-full border border-[#E2E8F0]"
+                      className="absolute inset-0 bg-white rounded-full border border-[#E2E8F0]"
                       style={{ zIndex: -1 }}
                       transition={{ type: "spring", stiffness: 500, damping: 35 }}
                     />
                   )}
                   <Icon className={cn("w-3.5 h-3.5 flex-shrink-0", key === 'rituals' && showFilter === key && "fill-orange-400 text-orange-400")} />
-                  <span className="hidden sm:inline">{label}</span>
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-full px-2 py-1.5 w-full sm:w-auto sm:ml-auto">
+            <button
+              onClick={() => { setDirection(-1); setDateOffset(p => p - 1); }}
+              className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#F1F4F9] transition-all active:scale-90"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-[#64748B]" />
+            </button>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={`${activeTab}-${dateOffset}`}
+                initial={{ opacity: 0, y: direction > 0 ? -6 : 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: direction > 0 ? 6 : -6 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#1E293B] min-w-[100px] sm:min-w-[120px] text-center"
+              >
+                {dateLabel}
+              </motion.span>
+            </AnimatePresence>
+            <button
+              onClick={() => { setDirection(1); setDateOffset(p => p + 1); }}
+              disabled={dateOffset >= 0}
+              className={cn(
+                "w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90",
+                dateOffset >= 0 ? "opacity-25 cursor-not-allowed" : "hover:bg-[#F1F4F9]"
+              )}
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-[#64748B]" />
+            </button>
           </div>
         </div>
       </div>

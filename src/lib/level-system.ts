@@ -1,5 +1,6 @@
 
 export const XP_PER_TASK = 10;
+export const XP_PER_NOTE = 5;
 export const XP_PER_RITUAL = 15;
 export const STREAK_XP_BONUS = 2; // Extra XP per day of streak (capped)
 export const MAX_STREAK_BONUS = 20;

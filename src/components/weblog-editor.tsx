@@ -19,7 +19,7 @@ import {
     X, Save, Bold, Italic, List, ListOrdered, CheckSquare,
     Link as LinkIcon, Image as ImageIcon, Quote, Heading1, Heading2,
     Heading3, Code, Undo, Redo, Download, FileText, Tag, Plus,
-    Underline, Strikethrough, Maximize2, Minimize2
+    Underline, Strikethrough, Maximize2, Minimize2, Check
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompactIconPicker } from "./icon-picker";
@@ -39,12 +39,13 @@ import { marked } from "marked";
 // Default color for weblog icons
 const DEFAULT_ICON_COLOR = "bg-amber-100";
 const ICON_COLORS = [DEFAULT_ICON_COLOR];
+const AUTOSAVE_IDLE_MS = 3000;
 
 interface WeblogEditorProps {
     isOpen: boolean;
     onClose: () => void;
     weblog?: Weblog | null;
-    onSave: (data: any) => Promise<void>;
+    onSave: (data: any, isAutoSave?: boolean) => Promise<string | void>;
     onProcessingStatusChange?: (isProcessing: boolean) => void;
     existingTags?: string[];
     folders: WeblogFolder[];
@@ -59,6 +60,10 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     const [newTag, setNewTag] = useState("");
     const [showTagInput, setShowTagInput] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isAutoSaving, setIsAutoSaving] = useState(false);
+    const [lastAutoSavedAt, setLastAutoSavedAt] = useState<number | null>(null);
+    const [autosaveTrigger, setAutosaveTrigger] = useState(0);
+    const [currentNoteId, setCurrentNoteId] = useState<string | null>(weblog?._id ? String(weblog._id) : null);
     const [showCloseWarning, setShowCloseWarning] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
@@ -78,9 +83,13 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     const folderIdRef = useRef(folderId);
     const tagsRef = useRef(tags);
     const rawTranscriptRef = useRef(rawTranscript);
+    const currentNoteIdRef = useRef<string | null>(currentNoteId);
     const isProcessingAudioRef = useRef(false);
     const isMountedRef = useRef(false);
     const shouldSaveOnCompleteRef = useRef(false);
+    const lastAutoSavedFingerprintRef = useRef<string>("");
+    const hasPendingChangesRef = useRef(false);
+    const lastEditAtRef = useRef(0);
 
     useEffect(() => {
         titleRef.current = title;
@@ -97,6 +106,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     useEffect(() => {
         rawTranscriptRef.current = rawTranscript;
     }, [rawTranscript]);
+    useEffect(() => {
+        currentNoteIdRef.current = currentNoteId;
+    }, [currentNoteId]);
     
     const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -108,6 +120,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const recorderMimeTypeRef = useRef<string>("audio/webm");
+    const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
     const processAudioNote = useAction(api.audio.processAudioNote);
@@ -170,7 +183,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                 const currentEmoji = emojiRef.current;
                 const currentFolderId = folderIdRef.current;
                 const currentTags = tagsRef.current;
-                const currentWeblogId = weblog?._id;
+                const currentWeblogId = currentNoteIdRef.current || weblog?._id;
                 const currentIsPinned = weblog?.isPinned;
 
                 try {
@@ -235,6 +248,8 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         if (editorRef.current) {
                             editorRef.current.innerHTML = finalContent;
                         }
+                        hasPendingChangesRef.current = true;
+                        lastEditAtRef.current = Date.now();
                     }
                 } catch (error) {
                     console.error("Failed to process audio end-to-end:", error);
@@ -394,6 +409,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
             isMountedRef.current = false;
             if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+            if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
             if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
                 audioContextRef.current.close().catch(console.error);
             }
@@ -444,7 +460,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
         setActiveFormats({ bold, italic, underline, strikethrough, h1, h2, h3, blockquote, ul, ol, code });
     }, []);
 
-    // Draft key for localStorage - use weblog id for editing, 'new' for new notes
+    // Draft key for localStorage
     const draftKey = useMemo(() => {
         return weblog?._id ? `weblog-draft-${weblog._id}` : 'weblog-draft-new';
     }, [weblog?._id]);
@@ -466,6 +482,20 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
             JSON.stringify(tags) !== JSON.stringify(originalTags)
         );
     }, [title, emoji, folderId, tags, weblog]);
+
+    const hasMeaningfulContent = useCallback(() => {
+        const contentHtml = editorRef.current?.innerHTML || "";
+        const tempDiv = document.createElement("div");
+        tempDiv.innerHTML = contentHtml;
+        const text = (tempDiv.textContent || tempDiv.innerText || "").replace(/\u00A0/g, " ").trim();
+
+        return Boolean(
+            title.trim() ||
+            text ||
+            rawTranscript?.trim() ||
+            tags.length > 0
+        );
+    }, [title, rawTranscript, tags]);
 
     // Save draft to localStorage
     const saveDraft = useCallback(() => {
@@ -499,9 +529,94 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
         localStorage.removeItem(draftKey);
     }, [draftKey]);
 
+    const markAutosavePending = useCallback(() => {
+        hasPendingChangesRef.current = true;
+        lastEditAtRef.current = Date.now();
+        setAutosaveTrigger((prev) => prev + 1);
+    }, []);
+
+    const handleTitleChange = useCallback((value: string) => {
+        setTitle(value);
+        markAutosavePending();
+    }, [markAutosavePending]);
+
+    const handleEmojiChange = useCallback((value: string) => {
+        setEmoji(value);
+        markAutosavePending();
+    }, [markAutosavePending]);
+
+    const handleFolderChange = useCallback((value: string | null) => {
+        setFolderId(value);
+        markAutosavePending();
+    }, [markAutosavePending]);
+
+    const getSavePayload = useCallback(() => ({
+        id: currentNoteIdRef.current || weblog?._id,
+        title: title.trim() || "Untitled Note",
+        content: getContent(),
+        emoji,
+        folderId: folderId || undefined,
+        tags,
+        isPinned: weblog?.isPinned,
+        rawTranscript,
+    }), [title, emoji, folderId, tags, rawTranscript, weblog?._id, weblog?.isPinned]);
+
+    const runAutoSave = useCallback(async (options?: { force?: boolean }) => {
+        const force = options?.force ?? false;
+        if (isAutoSaving || isSaving) return false;
+        if (!currentNoteIdRef.current && !hasMeaningfulContent()) return false;
+        if (!force) {
+            if (!hasPendingChangesRef.current) return false;
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+
+            const now = Date.now();
+            if (now - lastEditAtRef.current < AUTOSAVE_IDLE_MS) return false;
+        }
+
+        const payload = getSavePayload();
+        const fingerprint = JSON.stringify(payload);
+        if (fingerprint === lastAutoSavedFingerprintRef.current) return false;
+
+        setIsAutoSaving(true);
+        try {
+            const savedId = await onSave(payload, true);
+
+            if (!currentNoteIdRef.current && savedId) {
+                const normalizedId = String(savedId);
+                setCurrentNoteId(normalizedId);
+                currentNoteIdRef.current = normalizedId;
+                clearDraft();
+            }
+
+            lastAutoSavedFingerprintRef.current = JSON.stringify({
+                ...payload,
+                id: currentNoteIdRef.current || payload.id || undefined,
+            });
+            hasPendingChangesRef.current = false;
+            setLastAutoSavedAt(Date.now());
+            return true;
+        } catch (error) {
+            console.error("Auto-save to DB failed:", error);
+            return false;
+        } finally {
+            setIsAutoSaving(false);
+        }
+    }, [isAutoSaving, isSaving, hasMeaningfulContent, getSavePayload, onSave, clearDraft]);
+
     // Reset state when opening - check for draft first
     useEffect(() => {
         if (isOpen) {
+            const resolvedNoteId = weblog?._id ? String(weblog._id) : null;
+            setCurrentNoteId(resolvedNoteId);
+            currentNoteIdRef.current = resolvedNoteId;
+            lastAutoSavedFingerprintRef.current = "";
+            hasPendingChangesRef.current = false;
+            lastEditAtRef.current = 0;
+            if (autosaveTimeoutRef.current) {
+                clearTimeout(autosaveTimeoutRef.current);
+                autosaveTimeoutRef.current = null;
+            }
+
             const draft = loadDraft();
             if (draft && !weblog) {
                 // Load draft for new note
@@ -537,30 +652,54 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
         }
     }, [showTagInput]);
 
-    // Auto-save draft periodically while editing
+    // Debounced autosave schedule (triggered only by edits)
     useEffect(() => {
         if (!isOpen) return;
-        
-        const interval = setInterval(() => {
-            if (hasUnsavedChanges()) {
-                saveDraft();
-            }
-        }, 5000); // Auto-save every 5 seconds
+        if (!hasPendingChangesRef.current) return;
 
-        return () => clearInterval(interval);
-    }, [isOpen, hasUnsavedChanges, saveDraft]);
+        // Keep local draft only for brand-new notes that do not yet have an id.
+        if (!currentNoteIdRef.current) {
+            saveDraft();
+        }
+
+        if (autosaveTimeoutRef.current) {
+            clearTimeout(autosaveTimeoutRef.current);
+        }
+
+        autosaveTimeoutRef.current = setTimeout(() => {
+            void runAutoSave();
+        }, AUTOSAVE_IDLE_MS);
+
+        return () => {
+            if (autosaveTimeoutRef.current) {
+                clearTimeout(autosaveTimeoutRef.current);
+                autosaveTimeoutRef.current = null;
+            }
+        };
+    }, [isOpen, autosaveTrigger, saveDraft, runAutoSave]);
 
     const getContent = () => {
         return editorRef.current?.innerHTML || "";
     };
 
     // Handle close with warning
-    const handleClose = useCallback(() => {
+    const handleClose = useCallback(async () => {
         if (isProcessingAudioRef.current) {
             shouldSaveOnCompleteRef.current = true;
             onClose();
             return;
         }
+
+        const noteExists = Boolean(currentNoteIdRef.current || weblog?._id);
+        if (noteExists) {
+            if (hasUnsavedChanges()) {
+                await runAutoSave({ force: true });
+            }
+            clearDraft();
+            onClose();
+            return;
+        }
+
         if (hasUnsavedChanges()) {
             saveDraft(); // Save before showing warning
             setShowCloseWarning(true);
@@ -568,7 +707,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
             clearDraft();
             onClose();
         }
-    }, [hasUnsavedChanges, saveDraft, clearDraft, onClose]);
+    }, [hasUnsavedChanges, saveDraft, clearDraft, onClose, weblog?._id, runAutoSave]);
 
     // Discard draft and close
     const handleDiscardAndClose = useCallback(() => {
@@ -595,7 +734,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
         setIsSaving(true);
         try {
             await onSave({
-                id: weblog?._id,
+                id: currentNoteIdRef.current || weblog?._id,
                 title: title.trim() || "Untitled Note",
                 content: getContent(),
                 emoji,
@@ -604,6 +743,12 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                 isPinned: weblog?.isPinned,
                 rawTranscript
             });
+
+            if (!currentNoteIdRef.current && !weblog?._id) {
+                // Reset autosave fingerprint so new edits after initial create are detected correctly.
+                lastAutoSavedFingerprintRef.current = "";
+            }
+
             clearDraft(); // Clear draft on successful save
             onClose();
         } catch (error) {
@@ -815,6 +960,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
         const trimmedTag = tag.trim().toLowerCase();
         if (trimmedTag && !tags.includes(trimmedTag)) {
             setTags([...tags, trimmedTag]);
+            markAutosavePending();
         }
         setNewTag("");
         setShowTagInput(false);
@@ -822,6 +968,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
 
     const removeTag = (tagToRemove: string) => {
         setTags(tags.filter(t => t !== tagToRemove));
+        markAutosavePending();
     };
 
     const handleTagKeyDown = (e: React.KeyboardEvent) => {
@@ -1170,6 +1317,14 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     }, [isOpen, title, emoji, folderId, tags]);
 
     const suggestedTags = existingTags.filter(t => !tags.includes(t) && t.toLowerCase().includes(newTag.toLowerCase()));
+    const isSaveBusy = isSaving || isAutoSaving;
+    const saveButtonLabel = isSaving
+        ? "Saving..."
+        : isAutoSaving
+            ? "Auto-saving..."
+            : lastAutoSavedAt
+                ? "Saved"
+                : "Save";
 
     return (
         <>
@@ -1194,7 +1349,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         <div className="shrink-0 scale-75 origin-left -mr-2">
                             <CompactIconPicker
                                 selectedIcon={emoji}
-                                onSelectIcon={setEmoji}
+                                onSelectIcon={handleEmojiChange}
                                 selectedColor={DEFAULT_ICON_COLOR}
                                 onSelectColor={() => {}}
                                 colors={ICON_COLORS}
@@ -1202,9 +1357,9 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         </div>
                         <Input
                             value={title}
-                            onChange={(e) => setTitle(e.target.value)}
+                            onChange={(e) => handleTitleChange(e.target.value)}
                             placeholder="Note Title..."
-                            className="border-none shadow-none text-base font-bold bg-transparent p-0 h-7 focus-visible:ring-0 placeholder:text-slate-400 min-w-0"
+                            className="border-none shadow-none text-base font-bold bg-transparent p-0 h-7 focus-visible:ring-0 placeholder:text-slate-400 min-w-0 flex-1"
                         />
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -1218,11 +1373,23 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         </Button>
                         <Button
                             onClick={handleSave}
-                            disabled={isSaving}
+                            disabled={isSaveBusy}
                             size="sm"
-                            className="bg-green-500 hover:bg-green-600 text-white font-bold rounded-lg h-8 px-3"
+                            className={cn(
+                                "text-white font-bold rounded-lg h-8 px-3 min-w-[88px]",
+                                isSaveBusy ? "bg-green-500/90" : "bg-green-500 hover:bg-green-600"
+                            )}
                         >
-                            <Save className="w-4 h-4" />
+                            <span className="inline-flex items-center gap-1.5 text-xs">
+                                {isSaveBusy ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : lastAutoSavedAt ? (
+                                    <Check className="w-3.5 h-3.5" />
+                                ) : (
+                                    <Save className="w-3.5 h-3.5" />
+                                )}
+                                {saveButtonLabel}
+                            </span>
                         </Button>
                         <Button variant="ghost" size="icon" onClick={handleClose} className="text-slate-400 h-8 w-8">
                             <X className="w-5 h-5" />
@@ -1235,19 +1402,21 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                     <div className="flex items-center gap-3 flex-1">
                         <CompactIconPicker
                             selectedIcon={emoji}
-                            onSelectIcon={setEmoji}
+                            onSelectIcon={handleEmojiChange}
                             selectedColor={DEFAULT_ICON_COLOR}
                             onSelectColor={() => {}}
                             colors={ICON_COLORS}
                         />
 
                         <div className="flex flex-col flex-1">
-                            <Input
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                placeholder="Note Title..."
-                                className="border-none shadow-none text-xl font-black bg-transparent p-0 h-8 focus-visible:ring-0 placeholder:text-slate-400"
-                            />
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    value={title}
+                                    onChange={(e) => handleTitleChange(e.target.value)}
+                                    placeholder="Note Title..."
+                                    className="border-none shadow-none text-xl font-black bg-transparent p-0 h-8 focus-visible:ring-0 placeholder:text-slate-400 flex-1"
+                                />
+                            </div>
                             <div className="flex items-center gap-2 mt-1">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Folder:</span>
                                 <DropdownMenu>
@@ -1264,7 +1433,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                                         {folders.map(folder => (
                                             <DropdownMenuItem
                                                 key={folder._id}
-                                                onClick={() => setFolderId(folder._id)}
+                                                onClick={() => handleFolderChange(folder._id)}
                                                 className={cn(
                                                     "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer",
                                                     folderId === folder._id && "bg-slate-100 text-slate-900"
@@ -1312,11 +1481,17 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
 
                         <Button
                             onClick={handleSave}
-                            disabled={isSaving}
+                            disabled={isSaveBusy}
                             className="bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all"
                         >
-                            <Save className="w-4 h-4 mr-2" />
-                            Save
+                            {isSaveBusy ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : lastAutoSavedAt ? (
+                                <Check className="w-4 h-4 mr-2" />
+                            ) : (
+                                <Save className="w-4 h-4 mr-2" />
+                            )}
+                            {saveButtonLabel}
                         </Button>
                         <Button
                             variant="ghost"
@@ -1347,7 +1522,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                                 {folders.map(folder => (
                                     <DropdownMenuItem
                                         key={folder._id}
-                                        onClick={() => setFolderId(folder._id)}
+                                        onClick={() => handleFolderChange(folder._id)}
                                         className={cn(
                                             "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer",
                                             folderId === folder._id && "bg-slate-100 text-slate-900"
@@ -1594,6 +1769,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                     <div
                         ref={editorRef}
                         contentEditable
+                        onInput={markAutosavePending}
                         onSelect={updateActiveFormats}
                         onKeyUp={updateActiveFormats}
                         onClick={updateActiveFormats}

@@ -80,17 +80,27 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
         setEditorOpen(true);
     };
 
-    const handleSave = async (data: any) => {
+    const handleSave = async (data: any, isAutoSave = false): Promise<string | void> => {
         // If we're inside a folder, auto-attach folderId for new notes
         const saveData = { ...data };
         if (isInsideFolder && !data.id && !data.folderId) {
             saveData.folderId = selectedFolderId;
         }
+        let savedId: string | void;
         if (data.id) {
             await updateWeblog(data.id, saveData);
+            savedId = String(data.id);
         } else {
-            await addWeblog(saveData);
+            const createdId = await addWeblog(saveData);
+            savedId = createdId ? String(createdId) : undefined;
         }
+        
+        // Only close editor if it's NOT an auto-save
+        if (!isAutoSave) {
+            setEditorOpen(false);
+        }
+
+        return savedId;
     };
 
     const toggleTagFilter = (tag: string) => {
