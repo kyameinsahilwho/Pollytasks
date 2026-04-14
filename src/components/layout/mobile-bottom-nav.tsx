@@ -28,7 +28,7 @@ export function MobileBottomNav({
         return pathname.startsWith(path);
     };
 
-    const isMoreActive = isActive('/projects') || isActive('/archive') || isActive('/social') || isActive('/profile');
+    const isMoreActive = isActive('/projects') || isActive('/archive') || isActive('/profile');
 
     return (
         <>
@@ -62,17 +62,6 @@ export function MobileBottomNav({
                                 <span className="font-bold text-sm">Projects</span>
                             </Link>
                             <Link
-                                href="/social"
-                                onClick={() => setShowMoreMenu(false)}
-                                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-none border-b border-border/50 ${isActive('/social')
-                                    ? 'bg-zinc-100 dark:bg-zinc-800 text-purple-600 dark:text-purple-400'
-                                    : 'text-muted-foreground'
-                                    }`}
-                            >
-                                <span className={`material-symbols-outlined text-xl ${isActive('/social') ? "[font-variation-settings:'FILL'_1]" : ""}`}>group</span>
-                                <span className="font-bold text-sm">Squad</span>
-                            </Link>
-                            <Link
                                 href="/profile"
                                 onClick={() => setShowMoreMenu(false)}
                                 className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-none border-b border-border/50 ${isActive('/profile')
@@ -101,7 +90,7 @@ export function MobileBottomNav({
 
             <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 transition-all duration-300 bg-card/95 border-t-2 border-border backdrop-blur-md pb-safe">
                 <div className="flex flex-col">
-                    <div className="grid w-full grid-cols-4 p-2 h-auto bg-transparent border-0 rounded-none gap-1 relative">
+                    <div className="grid w-full grid-cols-5 p-2 h-auto bg-transparent border-0 rounded-none gap-1 relative">
                         <Link
                             href="/"
                             className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/')
@@ -110,6 +99,16 @@ export function MobileBottomNav({
                                 }`}
                         >
                             <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/') ? "[font-variation-settings:'FILL'_1]" : ""}`}>swords</span>
+                        </Link>
+
+                        <Link
+                            href="/notes"
+                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/notes')
+                                ? 'bg-zinc-100 dark:bg-zinc-800 text-amber-600 dark:text-amber-400 shadow-none'
+                                : 'bg-transparent text-muted-foreground'
+                                }`}
+                        >
+                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/notes') ? "[font-variation-settings:'FILL'_1]" : ""}`}>menu_book</span>
                         </Link>
 
                         {/* Center Quick Add Button */}
@@ -131,13 +130,13 @@ export function MobileBottomNav({
                         </div>
 
                         <Link
-                            href="/notes"
-                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/notes')
-                                ? 'bg-zinc-100 dark:bg-zinc-800 text-amber-600 dark:text-amber-400 shadow-none'
+                            href="/social"
+                            className={`relative rounded-xl flex items-center justify-center transition-all font-bold py-3 h-auto group transform transition-transform duration-75 ${isActive('/social')
+                                ? 'bg-zinc-100 dark:bg-zinc-800 text-purple-600 dark:text-purple-400 shadow-none'
                                 : 'bg-transparent text-muted-foreground'
                                 }`}
                         >
-                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/notes') ? "[font-variation-settings:'FILL'_1]" : ""}`}>menu_book</span>
+                            <span className={`material-symbols-outlined text-2xl relative z-10 transition-transform duration-75 group-active:scale-90 ${isActive('/social') ? "[font-variation-settings:'FILL'_1]" : ""}`}>group</span>
                         </Link>
 
                         {/* More Menu Button */}
