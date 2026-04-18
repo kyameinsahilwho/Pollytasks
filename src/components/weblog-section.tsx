@@ -1,15 +1,34 @@
 "use client";
 
 import { useState, useCallback, DragEvent } from "react";
-import { Plus, Search, Tag, X, FolderOpen, ChevronLeft, Inbox, GripVertical, FolderInput, Mic, Loader2 } from "lucide-react";
+import { Plus, Search, Tag, X, FolderOpen, ChevronLeft, Inbox, GripVertical, FolderInput, Mic, Loader2, Pencil, MoreVertical, Trash2 } from "lucide-react";
 import { useWeblogs, Weblog } from "@/hooks/use-weblogs";
 import { useWeblogFolders, WeblogFolder } from "@/hooks/use-weblog-folders";
 import { WeblogItem } from "./weblog-item";
 import { WeblogEditor } from "./weblog-editor";
-import { AddFolderDialog } from "./add-folder-dialog";
+import { AddFolderDialog, COLORS } from "./add-folder-dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "./ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "./ui/alert-dialog";
+import { Label } from "./ui/label";
+import { CompactIconPicker } from "./icon-picker";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { motion, AnimatePresence } from "framer-motion";
 import { Doc } from "../../convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
@@ -20,13 +39,18 @@ interface WeblogSectionProps {
 
 export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
     const { weblogs, allTags, addWeblog, updateWeblog, deleteWeblog, togglePin } = useWeblogs(initialWeblogs);
-    const { folders, addFolder, deleteFolder } = useWeblogFolders();
+    const { folders, addFolder, updateFolder, deleteFolder } = useWeblogFolders();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [editorOpen, setEditorOpen] = useState(false);
     const [editingWeblog, setEditingWeblog] = useState<Weblog | null>(null);
     const [isAddFolderOpen, setIsAddFolderOpen] = useState(false);
+    const [isEditFolderOpen, setIsEditFolderOpen] = useState(false);
+    const [isDeleteFolderConfirmOpen, setIsDeleteFolderConfirmOpen] = useState(false);
+    const [editFolderName, setEditFolderName] = useState("");
+    const [editFolderIcon, setEditFolderIcon] = useState("📁");
+    const [editFolderColor, setEditFolderColor] = useState(COLORS[0]);
     const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
     const [showUnfiled, setShowUnfiled] = useState(false);
     const [isProcessingAudio, setIsProcessingAudio] = useState(false);
@@ -123,6 +147,49 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
         setSelectedTags([]);
     };
 
+    const currentFolder = folders.find(f => f._id === selectedFolderId);
+
+    const openEditFolderDialog = useCallback(() => {
+        if (!currentFolder) return;
+        setEditFolderName(currentFolder.name);
+        setEditFolderIcon(currentFolder.icon || "📁");
+        setEditFolderColor(currentFolder.color || COLORS[0]);
+        setIsEditFolderOpen(true);
+    }, [currentFolder]);
+
+    const handleUpdateFolder = useCallback(async () => {
+        if (!currentFolder || !editFolderName.trim()) return;
+
+        await updateFolder(String(currentFolder._id), {
+            name: editFolderName.trim(),
+            icon: editFolderIcon,
+            color: editFolderColor,
+        });
+
+        setIsEditFolderOpen(false);
+    }, [currentFolder, editFolderColor, editFolderIcon, editFolderName, updateFolder]);
+
+    const handleDeleteFolder = useCallback(async () => {
+        if (!currentFolder) return;
+
+        const folderId = String(currentFolder._id);
+        const folderWeblogs = weblogs.filter(weblog => weblog.folderId === folderId);
+
+        await Promise.all(
+            folderWeblogs.map(weblog => updateWeblog(weblog._id, { folderId: undefined }))
+        );
+
+        await deleteFolder(folderId);
+        setIsEditFolderOpen(false);
+        setIsDeleteFolderConfirmOpen(false);
+        setSelectedFolderId(null);
+    }, [currentFolder, deleteFolder, updateWeblog, weblogs]);
+
+    const openDeleteFolderConfirm = useCallback(() => {
+        if (!currentFolder) return;
+        setIsDeleteFolderConfirmOpen(true);
+    }, [currentFolder]);
+
     // ─── Drag & Drop ───
 
     const handleDragStart = useCallback((e: DragEvent, weblogId: string) => {
@@ -158,7 +225,6 @@ export function WeblogSection({ initialWeblogs }: WeblogSectionProps) {
         }
     }, [updateWeblog]);
 
-    const currentFolder = folders.find(f => f._id === selectedFolderId);
     const hasActiveFilters = selectedTags.length > 0 || searchQuery;
 
     // ─── Folder grid view ───
@@ -430,6 +496,28 @@ function WeblogAnalyzingItem() {
                                 <span className="text-xs font-bold text-slate-400 shrink-0">
                                     ({currentWeblogs.length} note{currentWeblogs.length !== 1 ? 's' : ''})
                                 </span>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 shrink-0"
+                                            aria-label="Folder menu"
+                                        >
+                                            <MoreVertical className="w-4 h-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="rounded-xl border-2 border-slate-200 shadow-lg min-w-40">
+                                        <DropdownMenuItem onClick={openEditFolderDialog} className="font-bold cursor-pointer">
+                                            <Pencil className="mr-2 h-4 w-4" />
+                                            Edit folder
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={openDeleteFolderConfirm} className="font-bold text-rose-600 focus:text-rose-600 cursor-pointer">
+                                            <Trash2 className="mr-2 h-4 w-4" />
+                                            Delete folder
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </>
                         ) : (
                             <>
@@ -563,6 +651,98 @@ function WeblogAnalyzingItem() {
                 folders={folders}
                 initialFolderId={isInsideFolder ? selectedFolderId : null}
             />
+
+            <Dialog open={isEditFolderOpen} onOpenChange={setIsEditFolderOpen}>
+                <DialogContent className="w-[90vw] max-w-[560px] bg-white border-2 border-b-8 border-[#CBD5E1] text-[#1E293B] rounded-[2rem] shadow-2xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
+                    <DialogTitle className="sr-only">Edit Folder</DialogTitle>
+
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2E8F0] bg-white flex-shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-[#F1F4F9] border-2 border-b-4 border-[#CBD5E1] flex items-center justify-center">
+                                <Pencil className="w-5 h-5 text-[#1E293B] stroke-[3]" />
+                            </div>
+                            <h2 className="text-lg font-black font-headline uppercase tracking-tight text-[#1E293B]">Edit Folder</h2>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+                        <div className="space-y-2">
+                            <Label htmlFor="folder-name" className="text-[11px] font-black uppercase tracking-[0.15em] text-[#64748B]">Folder Name & Icon</Label>
+                            <div className="flex items-center gap-3">
+                                <CompactIconPicker
+                                    selectedIcon={editFolderIcon}
+                                    onSelectIcon={setEditFolderIcon}
+                                    selectedColor={editFolderColor}
+                                    onSelectColor={setEditFolderColor}
+                                    colors={COLORS}
+                                />
+                                <Input
+                                    id="folder-name"
+                                    value={editFolderName}
+                                    onChange={(e) => setEditFolderName(e.target.value)}
+                                    placeholder="Folder name"
+                                    className="flex-1 bg-white border-2 border-b-4 border-[#E2E8F0] focus-visible:border-[#CBD5E1] focus-visible:ring-0 h-14 rounded-lg text-sm font-bold text-[#1E293B] placeholder:text-[#CBD5E1] transition-all"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label className="text-[11px] font-black uppercase tracking-[0.15em] text-[#64748B]">Folder Color</Label>
+                            <div className="flex gap-2 flex-wrap">
+                                {COLORS.map((color) => (
+                                    <button
+                                        key={color}
+                                        type="button"
+                                        onClick={() => setEditFolderColor(color)}
+                                        className={cn(
+                                            "w-9 h-9 rounded-full border-3 transition-all shadow-sm active:scale-90 cursor-pointer",
+                                            color.split(' ')[0],
+                                            editFolderColor === color ? "scale-125 border-[#1E293B] shadow-md" : "border-transparent hover:scale-110"
+                                        )}
+                                        title={color}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="border-t border-[#E2E8F0] px-6 py-4 bg-white flex-shrink-0 flex-row gap-2 sm:justify-end">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsEditFolderOpen(false)}
+                            className="h-11 rounded-xl border-2 border-[#CBD5E1] px-5 font-black"
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!editFolderName.trim()}
+                            onClick={handleUpdateFolder}
+                            className="h-11 rounded-xl bg-[#6366f1] border-2 border-b-[6px] border-[#4f46e5] text-white hover:bg-[#818cf8] hover:border-[#6366f1] px-5 font-black active:translate-y-[2px] active:border-b-[4px] transition-all"
+                        >
+                            Save Changes
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <AlertDialog open={isDeleteFolderConfirmOpen} onOpenChange={setIsDeleteFolderConfirmOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete folder?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will remove the folder, but your notes will stay and be moved back to unfiled.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDeleteFolder} className="bg-rose-600 text-white hover:bg-rose-700">
+                            Delete folder
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

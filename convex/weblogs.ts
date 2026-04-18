@@ -250,8 +250,30 @@ export const deleteFolder = mutation({
         const identity = await ctx.auth.getUserIdentity();
         if (!identity) throw new Error("Unauthenticated");
 
-        // Could optionally nullify folderId on associated weblogs here
-        // but simple delete is fine for now
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_token", (q) =>
+                q.eq("tokenIdentifier", identity.tokenIdentifier)
+            )
+            .unique();
+
+        if (!user) throw new Error("User not found");
+
+        const weblogs = await ctx.db
+            .query("weblogs")
+            .withIndex("by_user", (q) => q.eq("userId", user._id))
+            .collect();
+
+        const now = new Date().toISOString();
+        await Promise.all(
+            weblogs
+                .filter(weblog => weblog.folderId === args.id)
+                .map(weblog => ctx.db.patch(weblog._id, {
+                    folderId: undefined,
+                    updatedAt: now,
+                }))
+        );
+
         await ctx.db.delete(args.id);
     },
 });
