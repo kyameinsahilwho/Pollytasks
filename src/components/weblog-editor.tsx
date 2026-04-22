@@ -33,7 +33,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Mic, Square, Loader2, Eye, EyeOff, Pause, Play } from "lucide-react";
+import { Mic, Square, Loader2, Eye, EyeOff, Pause, Play, RotateCcw } from "lucide-react";
 import { marked } from "marked";
 
 // Default color for weblog icons
@@ -121,6 +121,8 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
     const audioChunksRef = useRef<Blob[]>([]);
     const recorderMimeTypeRef = useRef<string>("audio/webm");
     const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const [showResetWarning, setShowResetWarning] = useState(false);
+    const shouldProcessAudioRef = useRef(true);
 
     const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
     const processAudioNote = useAction(api.audio.processAudioNote);
@@ -133,6 +135,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
 
     const startRecording = async () => {
         try {
+            shouldProcessAudioRef.current = true;
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const preferredMimeTypes = [
                 "audio/webm;codecs=opus",
@@ -159,6 +162,26 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
             };
 
             mediaRecorder.onstop = async () => {
+                if (!shouldProcessAudioRef.current) {
+                    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+                    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+                    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                        audioContextRef.current.close().catch(console.error);
+                    }
+                    audioContextRef.current = null;
+                    analyserRef.current = null;
+                    animationFrameRef.current = null;
+                    if (isMountedRef.current) setRecordingTime(0);
+                    stream.getTracks().forEach(track => track.stop());
+                    audioChunksRef.current = [];
+                    setTimeout(() => {
+                        if (isMountedRef.current && isRecordingModalOpen) {
+                            startRecording();
+                        }
+                    }, 300);
+                    return;
+                }
+                
                 setIsProcessingAudio(true);
                 isProcessingAudioRef.current = true;
                 
@@ -211,15 +234,20 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                     const finalTitle = aiResponse.title || currentTitle || "Untitled Note";
                     const finalEmoji = aiResponse.emoji || currentEmoji || "📝";
                     
-                    const finalRawTranscript = aiResponse.structuredContent 
-                        ? marked.parse(aiResponse.structuredContent, { gfm: true, breaks: true }) as string
-                        : "";
+                    const currentRawTranscript = rawTranscriptRef.current || "";
+                    let finalRawTranscript = currentRawTranscript;
+                    if (aiResponse.structuredContent) {
+                        const parsedHtml = marked.parse(aiResponse.structuredContent, { gfm: true, breaks: true }) as string;
+                        finalRawTranscript = finalRawTranscript 
+                            ? finalRawTranscript + '<br><br><hr><br>' + parsedHtml
+                            : parsedHtml;
+                    }
                     
                     let finalContent = currentEditorContent;
                     if (aiResponse.rawTranscript) {
                         const transcriptHtml = aiResponse.rawTranscript.replace(/\n/g, '<br>');
                         finalContent = finalContent 
-                            ? finalContent + '<br><br>' + transcriptHtml
+                            ? finalContent + '<br><br><hr><br>' + transcriptHtml
                             : transcriptHtml;
                     }
 
@@ -350,6 +378,17 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
             setIsRecordingModalOpen(false);
             // Most cleanup happens in onstop to avoid double-closing AudioContext
         }
+    };
+
+    const resetRecording = () => {
+        if (mediaRecorderRef.current) {
+            shouldProcessAudioRef.current = false;
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            setIsPaused(false);
+            isPausedRef.current = false;
+        }
+        setShowResetWarning(false);
     };
 
     const pauseRecording = () => {
@@ -1863,7 +1902,13 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         />
                     </div>
 
-                    <div className="flex gap-3 w-full">
+                    <div className="flex gap-2 w-full">
+                        <Button
+                            onClick={() => setShowResetWarning(true)}
+                            className="h-14 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black text-base rounded-2xl border-b-4 border-slate-400 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center"
+                        >
+                            <RotateCcw className="w-5 h-5" />
+                        </Button>
                         <Button
                             onClick={isPaused ? resumeRecording : pauseRecording}
                             className={cn(
@@ -1887,6 +1932,22 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                 </div>
             </DialogContent>
         </Dialog>
+
+        {/* Reset warning dialog */}
+        <AlertDialog open={showResetWarning} onOpenChange={setShowResetWarning}>
+            <AlertDialogContent className="rounded-2xl border-2">
+                <AlertDialogHeader>
+                    <AlertDialogTitle className="font-black">Restart Recording?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        This will permanently delete your current audio and start over. This action cannot be undone.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel className="rounded-xl font-bold border-2">Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={resetRecording} className="rounded-xl font-bold bg-red-500 hover:bg-red-600">Restart</AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
 
         {/* Close warning dialog */}
         <AlertDialog open={showCloseWarning} onOpenChange={setShowCloseWarning}>
