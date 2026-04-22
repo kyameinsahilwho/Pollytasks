@@ -210,17 +210,17 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                     // Construct final note data
                     const finalTitle = aiResponse.title || currentTitle || "Untitled Note";
                     const finalEmoji = aiResponse.emoji || currentEmoji || "📝";
-                    const finalRawTranscript = aiResponse.rawTranscript || "";
+                    
+                    const finalRawTranscript = aiResponse.structuredContent 
+                        ? marked.parse(aiResponse.structuredContent, { gfm: true, breaks: true }) as string
+                        : "";
                     
                     let finalContent = currentEditorContent;
-                    if (aiResponse.structuredContent) {
-                        const htmlContent = marked.parse(aiResponse.structuredContent, { 
-                            gfm: true, 
-                            breaks: true 
-                        });
+                    if (aiResponse.rawTranscript) {
+                        const transcriptHtml = aiResponse.rawTranscript.replace(/\n/g, '<br>');
                         finalContent = finalContent 
-                            ? finalContent + '<br><br>' + htmlContent
-                            : htmlContent as string;
+                            ? finalContent + '<br><br>' + transcriptHtml
+                            : transcriptHtml;
                     }
 
                     // 3. Auto-save in background if requested or if component is unmounting
@@ -243,7 +243,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                         // 4. Update editor UI if still mounted
                         if (aiResponse.title) setTitle(aiResponse.title);
                         if (aiResponse.emoji) setEmoji(aiResponse.emoji);
-                        if (aiResponse.rawTranscript) setRawTranscript(aiResponse.rawTranscript);
+                        if (finalRawTranscript) setRawTranscript(finalRawTranscript);
                         
                         if (editorRef.current) {
                             editorRef.current.innerHTML = finalContent;
@@ -1642,7 +1642,7 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
                                 )}
                             >
                                 {showRawTranscript ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                {showRawTranscript ? "Hide Transcript" : "View Transcript"}
+                                {showRawTranscript ? "Hide AI Summary" : "View AI Summary"}
                             </Button>
                         )}
                         
@@ -1698,16 +1698,17 @@ export function WeblogEditor({ isOpen, onClose, weblog, onSave, onProcessingStat
 
                 {/* Rich Text Editor - WYSIWYG */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-white/40 dark:bg-black/20 custom-scrollbar relative">
-                    {/* Raw Transcript View */}
+                    {/* AI Summary View */}
                     {showRawTranscript && rawTranscript && (
                         <div className="mb-6 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-900/20 border-2 border-indigo-100/50 dark:border-indigo-800/30 animate-in slide-in-from-top-2 duration-300">
                             <div className="flex items-center gap-2 mb-2">
                                 <Mic className="w-3.5 h-3.5 text-indigo-500" />
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Raw Transcription</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">AI Summary</span>
                             </div>
-                            <p className="text-sm text-slate-600 dark:text-slate-300 italic leading-relaxed">
-                                "{rawTranscript}"
-                            </p>
+                            <div 
+                                className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed [&>h1]:text-lg [&>h1]:font-bold [&>h2]:text-base [&>h2]:font-bold [&>p]:mb-2 [&>ul]:list-disc [&>ul]:pl-5 [&>ol]:list-decimal [&>ol]:pl-5 [&_strong]:font-bold"
+                                dangerouslySetInnerHTML={{ __html: rawTranscript }}
+                            />
                         </div>
                     )}
 
